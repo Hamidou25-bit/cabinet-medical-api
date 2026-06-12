@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cabinet Médical BabaMouneissa sangha</title>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<script src="js/auth.js"></script>
+
+<!-- SIDEBAR -->
+<div class="sidebar">
+    <div class="sidebar-header">
+        <h2>🏥 Cabinet Médical</h2>
+        <p>BabaMouneissa</p>
+    </div>
+    <div class="sidebar-menu">
+        <div class="menu-section">Principal</div>
+        <div class="menu-item active" onclick="showPage('dashboard')">
+            <span class="icon">📊</span> Tableau de bord
+        </div>
+
+        <div class="menu-section">Clinique</div>
+        <div class="menu-item" onclick="showPage('patients')">
+            <span class="icon">👥</span> Patients
+        </div>
+        <div class="menu-item" onclick="showPage('consultations')">
+            <span class="icon">🩺</span> Consultations
+        </div>
+
+        <div class="menu-section">Pharmacie</div>
+        <div class="menu-item" onclick="showPage('stock')">
+            <span class="icon">💊</span> Stock
+        </div>
+    </div>
+</div>
+
+<!-- MAIN -->
+<div class="main">
+    <div class="topbar">
+        <h1 id="page-title">Tableau de bord</h1>
+        <div class="topbar-right"><span id="user-name" style="margin-right: 15px; font-weight: bold;"></span><button onclick="logout()" style="background: #e74c3c; color: white; border: none; padding: 5px 10px; border-radius: 4px; cursor: pointer; margin-right: 15px;">Déconnexion</button><span id="current-date"></span>
+        </div>
+    </div>
+
+    <div class="content">
+
+        <!-- DASHBOARD -->
+        <div id="page-dashboard" class="page active">
+            <div class="cards-grid">
+                <div class="card">
+                    <h3>Total Patients</h3>
+                    <div class="value" id="stat-patients">...</div>
+                    <div class="sub">Patients enregistrés</div>
+                </div>
+                <div class="card green">
+                    <h3>Consultations</h3>
+                    <div class="value" id="stat-consultations">...</div>
+                    <div class="sub">Total consultations</div>
+                </div>
+                <div class="card orange">
+                    <h3>Stock</h3>
+                    <div class="value" id="stat-stock">...</div>
+                    <div class="sub">Articles en stock</div>
+                </div>
+                <div class="card red">
+                    <h3>Alertes Stock</h3>
+                    <div class="value" id="stat-alertes">...</div>
+                    <div class="sub">Articles sous seuil</div>
+                </div>
+            </div>
+
+            <div class="table-container">
+                <div class="table-header">
+                    <h3>Dernières consultations</h3>
+                </div>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Date</th>
+                            <th>Patient</th>
+                            <th>Motif</th>
+                            <th>Montant</th>
+                        </tr>
+                    </thead>
+                    <tbody id="recent-consultations">
+                        <tr><td colspan="4" class="loading">Chargement...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- PATIENTS -->
+        <div id="page-patients" class="page">
+            <div class="table-container">
+                <div class="table-header">
+                    <h3>Liste des patients</h3>
+                    <div style="display:flex; gap:10px;">
+                        <input type="text" class="search-box" placeholder="Rechercher..." id="search-patients" oninput="filterPatients()">
+                        <button class="btn btn-primary" onclick="openModal('modal-patient')">+ Nouveau patient</button>
+                    </div>
+                </div>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Nom</th>
+                            <th>Prénom</th>
+                            <th>Âge</th>
+                            <th>Sexe</th>
+                            <th>Téléphone</th>
+                            <th>Date enreg.</th>
+                        </tr>
+                    </thead>
+                    <tbody id="table-patients">
+                        <tr><td colspan="6" class="loading">Chargement...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- CONSULTATIONS -->
+        <div id="page-consultations" class="page">
+            <div class="table-container">
+                <div class="table-header">
+                    <h3>Liste des consultations</h3>
+                </div>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Date</th>
+                            <th>Patient</th>
+                            <th>Motif</th>
+                            <th>Diagnostic</th>
+                            <th>Montant</th>
+                        </tr>
+                    </thead>
+                    <tbody id="table-consultations">
+                        <tr><td colspan="5" class="loading">Chargement...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- STOCK -->
+        <div id="page-stock" class="page">
+            <div id="alertes-stock"></div>
+            <div class="table-container">
+                <div class="table-header">
+                    <h3>Stock médicaments</h3>
+                    <input type="text" class="search-box" placeholder="Rechercher..." id="search-stock" oninput="filterStock()">
+                </div>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Désignation</th>
+                            <th>Type</th>
+                            <th>Quantité</th>
+                            <th>Seuil alerte</th>
+                            <th>Prix vente</th>
+                            <th>Statut</th>
+                        </tr>
+                    </thead>
+                    <tbody id="table-stock">
+                        <tr><td colspan="6" class="loading">Chargement...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+    </div>
+</div>
+
+<!-- MODAL NOUVEAU PATIENT -->
+<div class="modal-overlay" id="modal-patient">
+    <div class="modal">
+        <h3>Nouveau Patient</h3>
+        <div class="form-row">
+            <div class="form-group">
+                <label>Nom</label>
+                <input type="text" id="p-nom" placeholder="Nom">
+            </div>
+            <div class="form-group">
+                <label>Prénom</label>
+                <input type="text" id="p-prenom" placeholder="Prénom">
+            </div>
+        </div>
+        <div class="form-row">
+            <div class="form-group">
+                <label>Âge</label>
+                <input type="number" id="p-age" placeholder="Âge">
+            </div>
+            <div class="form-group">
+                <label>Sexe</label>
+                <select id="p-sexe">
+                    <option value="Masculin">Masculin</option>
+                    <option value="Féminin">Féminin</option>
+                </select>
+            </div>
+        </div>
+        <div class="form-row">
+            <div class="form-group">
+                <label>Téléphone</label>
+                <input type="text" id="p-telephone" placeholder="Téléphone">
+            </div>
+            <div class="form-group">
+                <label>Profession</label>
+                <input type="text" id="p-profession" placeholder="Profession">
+            </div>
+        </div>
+        <div class="form-group">
+            <label>Adresse</label>
+            <input type="text" id="p-adresse" placeholder="Adresse">
+        </div>
+        <div class="modal-actions">
+            <button class="btn" onclick="closeModal('modal-patient')">Annuler</button>
+            <button class="btn btn-primary" onclick="savePatient()">Enregistrer</button>
+        </div>
+    </div>
+</div>
+
+<script src="js/app.js"></script>
+</body>
+</html>

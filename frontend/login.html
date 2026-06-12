@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Connexion - Cabinet Médical BabaMouneissa</title>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<div class="login-page">
+    <div class="login-box">
+        <h2>🏥 Cabinet Médical</h2>
+        <p class="subtitle">BabaMouneissa</p>
+
+        <div class="login-error" id="login-error"></div>
+
+        <form id="login-form">
+            <div class="form-group">
+                <label>Identifiant</label>
+                <input type="text" id="nom_utilisateur" required>
+            </div>
+            <div class="form-group">
+                <label>Mot de passe</label>
+                <input type="password" id="mot_de_passe" required>
+            </div>
+            <button type="submit" class="btn btn-primary">Se connecter</button>
+        </form>
+    </div>
+</div>
+
+<script>
+const API_URL = "http://51.161.10.252:8000";
+
+if (localStorage.getItem("token")) {
+    window.location.href = "index.html";
+}
+
+document.getElementById("login-form").addEventListener("submit", async function(e) {
+    e.preventDefault();
+
+    const nom_utilisateur = document.getElementById("nom_utilisateur").value;
+    const mot_de_passe = document.getElementById("mot_de_passe").value;
+    const errorBox = document.getElementById("login-error");
+    errorBox.classList.remove("active");
+
+    try {
+        const response = await fetch(API_URL + "/auth/login", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ nom_utilisateur, mot_de_passe })
+        });
+
+        if (!response.ok) {
+            errorBox.textContent = "Identifiant ou mot de passe incorrect";
+            errorBox.classList.add("active");
+            return;
+        }
+
+        const data = await response.json();
+        localStorage.setItem("token", data.access_token);
+        localStorage.setItem("nom_utilisateur", data.nom_utilisateur);
+        localStorage.setItem("role", data.role);
+
+        window.location.href = "index.html";
+
+    } catch (err) {
+        errorBox.textContent = "Erreur de connexion au serveur";
+        errorBox.classList.add("active");
+    }
+});
+</script>
+
+</body>
+</html>
