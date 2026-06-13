@@ -42,3 +42,44 @@ def create_consultation(consultation: dict, db=Depends(get_db), user=Depends(get
     """, consultation)
     db.commit()
     return {"message": "Consultation créée", "id": cursor.fetchone()["id"]}
+
+
+@router.put("/{consultation_id}")
+def update_consultation(consultation_id: int, consultation: dict, db=Depends(get_db), user=Depends(get_current_user)):
+    cursor = db.cursor()
+    cursor.execute("""
+        UPDATE consultations
+        SET date_consult = %(date_consult)s,
+            prix_unitaire = %(prix_unitaire)s,
+            montant_total = %(montant_total)s,
+            patient_id = %(patient_id)s,
+            motif = %(motif)s,
+            diagnostic = %(diagnostic)s,
+            observation = %(observation)s,
+            traitement_apres_diagnostic = %(traitement_apres_diagnostic)s
+        WHERE id = %s
+    """, (
+        consultation.get("date_consult"),
+        consultation.get("prix_unitaire"),
+        consultation.get("montant_total"),
+        consultation.get("patient_id"),
+        consultation.get("motif"),
+        consultation.get("diagnostic"),
+        consultation.get("observation"),
+        consultation.get("traitement_apres_diagnostic"),
+        consultation_id
+    ))
+    if cursor.rowcount == 0:
+        raise HTTPException(status_code=404, detail="Consultation non trouvée")
+    db.commit()
+    return {"message": "Consultation mise à jour"}
+
+
+@router.delete("/{consultation_id}")
+def delete_consultation(consultation_id: int, db=Depends(get_db), user=Depends(get_current_user)):
+    cursor = db.cursor()
+    cursor.execute("DELETE FROM consultations WHERE id = %s", (consultation_id,))
+    if cursor.rowcount == 0:
+        raise HTTPException(status_code=404, detail="Consultation non trouvée")
+    db.commit()
+    return {"message": "Consultation supprimée"}

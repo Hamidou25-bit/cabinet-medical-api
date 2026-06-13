@@ -53,6 +53,11 @@ def login(data: LoginData, db=Depends(get_db)):
     }
 
 
+@router.get("/me")
+def me(user=Depends(get_current_user)):
+    return {"user": user}
+
+
 def get_current_user(token: str = Depends(oauth2_scheme)):
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
