@@ -53,11 +53,6 @@ def login(data: LoginData, db=Depends(get_db)):
     }
 
 
-@router.get("/me")
-def me(user=Depends(get_current_user)):
-    return {"user": user}
-
-
 def get_current_user(token: str = Depends(oauth2_scheme)):
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
@@ -66,6 +61,11 @@ def get_current_user(token: str = Depends(oauth2_scheme)):
         raise HTTPException(status_code=401, detail="Session expirée, veuillez vous reconnecter")
     except jwt.InvalidTokenError:
         raise HTTPException(status_code=401, detail="Token invalide")
+
+
+@router.get("/me")
+def me(user=Depends(get_current_user)):
+    return {"user": user}
 
 
 def require_role(*allowed_roles):
