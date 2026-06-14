@@ -10,7 +10,7 @@ router = APIRouter(prefix="/depenses", tags=["Dépenses"])
 def get_depenses(db=Depends(get_db), user=Depends(get_current_user)):
     cursor = db.cursor()
     cursor.execute("""
-        SELECT id_depense, date_depense, type_depense, montant, description
+        SELECT id_depense, date_depense, type_depense, montant, description, achat_id
         FROM depense
         ORDER BY date_depense DESC, id_depense DESC
     """)
@@ -41,6 +41,12 @@ def update_depense(depense_id: int, data: dict, db=Depends(get_db), user=Depends
     require_fields(data, ["date_depense", "type_depense", "montant"])
     require_positive(data, ["montant"])
     cursor = db.cursor()
+    cursor.execute("SELECT achat_id FROM depense WHERE id_depense = %s", (depense_id,))
+    existing = cursor.fetchone()
+    if not existing:
+        raise HTTPException(status_code=404, detail="Dépense non trouvée")
+    if existing["achat_id"] is not None:
+        raise HTTPException(status_code=400, detail="Cette dépense est générée automatiquement depuis un achat. Modifiez l'achat correspondant.")
     cursor.execute("""
         UPDATE depense
         SET date_depense = %(date_depense)s,
@@ -64,8 +70,12 @@ def update_depense(depense_id: int, data: dict, db=Depends(get_db), user=Depends
 @router.delete("/{depense_id}")
 def delete_depense(depense_id: int, db=Depends(get_db), user=Depends(require_role("admin"))):
     cursor = db.cursor()
-    cursor.execute("DELETE FROM depense WHERE id_depense = %s", (depense_id,))
-    if cursor.rowcount == 0:
+    cursor.execute("SELECT achat_id FROM depense WHERE id_depense = %s", (depense_id,))
+    existing = cursor.fetchone()
+    if not existing:
         raise HTTPException(status_code=404, detail="Dépense non trouvée")
+    if existing["achat_id"] is not None:
+        raise HTTPException(status_code=400, detail="Cette dépense est générée automatiquement depuis un achat. Annulez l'achat correspondant pour la supprimer.")
+    cursor.execute("DELETE FROM depense WHERE id_depense = %s", (depense_id,))
     db.commit()
     return {"message": "Dépense supprimée"}
