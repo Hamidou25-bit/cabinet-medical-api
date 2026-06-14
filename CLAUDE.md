@@ -55,7 +55,7 @@ def get_items(db=Depends(get_db), user=Depends(get_current_user)):
 
 ## Tables PostgreSQL pertinentes
 
-Tables principales : `patients`, `consultations`, `ordonnance`, `ligne_ordonnance`, `rendez_vous`, `stock`, `sortie`, `achats`, `lignes_achat`, `comptabilite`, `depense`, `personnel`, `utilisateurs`, `examens_complementaires`, `medecin`, `dosages`, `formes`, `fournisseur`, `materiel_cabinet`, `soins`, `dossier_patients`, `audit_logs`
+Tables principales : `patients`, `consultations`, `ordonnance`, `ligne_ordonnance`, `rendez_vous`, `stock`, `sortie`, `achats`, `lignes_achat`, `comptabilite`, `depense`, `type_depense`, `personnel`, `utilisateurs`, `examens_complementaires`, `medecin`, `dosages`, `formes`, `fournisseur`, `materiel_cabinet`, `soins`, `dossier_patients`, `audit_logs`
 
 ## État des modules API
 
@@ -70,7 +70,7 @@ Tables principales : `patients`, `consultations`, `ordonnance`, `ligne_ordonnanc
 | Rendez-vous (liste + création) | ✅ |
 | Examens complémentaires | ❌ à faire |
 | Personnel | ❌ à faire |
-| Comptabilité | ❌ à faire |
+| Comptabilité | 🟡 en cours (`type_depense` CRUD admin, `depenses` lecture) |
 | Rapports | ❌ à faire |
 | CRUD Patients (modifier/supprimer) | ❌ à faire (colonne `supprime`) |
 | CRUD Stock (entrées/sorties) | ❌ à faire (table `sortie`) |
