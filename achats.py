@@ -150,9 +150,8 @@ def _nettoyer_articles_crees(cursor, achat_id):
 
     for stock_id in stock_ids:
         cursor.execute("""
-            SELECT 1 FROM lignes_achat la
-            JOIN achats a ON a.id = la.achat_id
-            WHERE la.stock_id = %s AND la.achat_id != %s AND a.statut_facture != 'Annulé'
+            SELECT 1 FROM lignes_achat
+            WHERE stock_id = %s AND achat_id != %s
             LIMIT 1
         """, (stock_id, achat_id))
         if cursor.fetchone():
@@ -242,11 +241,9 @@ def update_achat(achat_id: int, data: dict, db=Depends(get_db), user=Depends(req
     montant_total = sum(l.get("quantite", 1) * l.get("prix_unitaire", 0) for l in lignes)
     fournisseur_nom = _get_fournisseur_nom(cursor, data.get("fournisseur_id"))
 
-    cursor.execute('SELECT statut_facture FROM achats WHERE id = %s', (achat_id,))
-    existing = cursor.fetchone()
-    if not existing:
+    cursor.execute('SELECT id FROM achats WHERE id = %s', (achat_id,))
+    if not cursor.fetchone():
         raise HTTPException(status_code=404, detail="Achat non trouvé")
-    etait_actif = existing["statut_facture"] != "Annulé"
 
     cursor.execute("""
         UPDATE achats
@@ -267,18 +264,10 @@ def update_achat(achat_id: int, data: dict, db=Depends(get_db), user=Depends(req
         "id": achat_id,
     })
 
-    if etait_actif:
-        _retirer_lignes_du_stock(cursor, achat_id)
-
+    _retirer_lignes_du_stock(cursor, achat_id)
     cursor.execute("DELETE FROM lignes_achat WHERE achat_id = %s", (achat_id,))
-
-    if etait_actif:
-        _insert_lignes(cursor, achat_id, lignes, data["date_achat"], fournisseur_nom)
-        _upsert_depense_achat(cursor, achat_id, data["date_achat"], montant_total, fournisseur_nom, data.get("numero_facture"))
-    else:
-        # Achat annulé : on ne réinjecte pas dans le stock et on ne touche pas à la dépense (déjà supprimée)
-        for ligne in lignes:
-            _inserer_ligne_achat(cursor, achat_id, ligne, ligne.get("stock_id"))
+    _insert_lignes(cursor, achat_id, lignes, data["date_achat"], fournisseur_nom)
+    _upsert_depense_achat(cursor, achat_id, data["date_achat"], montant_total, fournisseur_nom, data.get("numero_facture"))
 
     db.commit()
     return {"message": "Achat mis à jour"}
@@ -287,16 +276,14 @@ def update_achat(achat_id: int, data: dict, db=Depends(get_db), user=Depends(req
 @router.delete("/{achat_id}")
 def delete_achat(achat_id: int, db=Depends(get_db), user=Depends(require_role("admin"))):
     cursor = db.cursor()
-    cursor.execute("SELECT statut_facture FROM achats WHERE id = %s", (achat_id,))
-    achat = cursor.fetchone()
-    if not achat:
+    cursor.execute("SELECT id FROM achats WHERE id = %s", (achat_id,))
+    if not cursor.fetchone():
         raise HTTPException(status_code=404, detail="Achat non trouvé")
 
-    if achat["statut_facture"] != "Annulé":
-        _retirer_lignes_du_stock(cursor, achat_id)
-        _nettoyer_articles_crees(cursor, achat_id)
-        cursor.execute("DELETE FROM depense WHERE achat_id = %s", (achat_id,))
-
-    cursor.execute("UPDATE achats SET statut_facture = 'Annulé' WHERE id = %s", (achat_id,))
+    _retirer_lignes_du_stock(cursor, achat_id)
+    _nettoyer_articles_crees(cursor, achat_id)
+    cursor.execute("DELETE FROM depense WHERE achat_id = %s", (achat_id,))
+    cursor.execute("DELETE FROM lignes_achat WHERE achat_id = %s", (achat_id,))
+    cursor.execute("DELETE FROM achats WHERE id = %s", (achat_id,))
     db.commit()
-    return {"message": "Achat annulé"}
+    return {"message": "Achat supprimé"}

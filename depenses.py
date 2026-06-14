@@ -75,7 +75,7 @@ def delete_depense(depense_id: int, db=Depends(get_db), user=Depends(require_rol
     if not existing:
         raise HTTPException(status_code=404, detail="Dépense non trouvée")
     if existing["achat_id"] is not None:
-        raise HTTPException(status_code=400, detail="Cette dépense est générée automatiquement depuis un achat. Annulez l'achat correspondant pour la supprimer.")
+        raise HTTPException(status_code=400, detail="Cette dépense est générée automatiquement depuis un achat. Supprimez l'achat correspondant pour la supprimer.")
     cursor.execute("DELETE FROM depense WHERE id_depense = %s", (depense_id,))
     db.commit()
     return {"message": "Dépense supprimée"}
