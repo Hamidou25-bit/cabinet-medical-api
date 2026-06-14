@@ -2,6 +2,7 @@ from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException
 from database import get_db
 from auth import get_current_user
+from validation import require_fields
 
 router = APIRouter(prefix="/rendez-vous", tags=["Rendez-vous"])
 
@@ -39,6 +40,7 @@ def get_rendez_vous_by_id(rendez_vous_id: int, db=Depends(get_db), user=Depends(
 
 @router.post("/")
 def create_rendez_vous(data: dict, db=Depends(get_db), user=Depends(get_current_user)):
+    require_fields(data, ["patient_id", "date_heure_rdv"])
     cursor = db.cursor()
     cursor.execute("""
         INSERT INTO rendez_vous (patient_id, medecin_id, date_heure_rdv, motif, statut, notes, date_creation)
@@ -59,6 +61,7 @@ def create_rendez_vous(data: dict, db=Depends(get_db), user=Depends(get_current_
 
 @router.put("/{rendez_vous_id}")
 def update_rendez_vous(rendez_vous_id: int, data: dict, db=Depends(get_db), user=Depends(get_current_user)):
+    require_fields(data, ["patient_id", "date_heure_rdv"])
     cursor = db.cursor()
     cursor.execute("""
         UPDATE rendez_vous

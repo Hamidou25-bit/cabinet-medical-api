@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from database import get_db
 from auth import get_current_user, require_role
+from validation import require_fields, require_positive
 
 router = APIRouter(prefix="/depenses", tags=["Dépenses"])
 
@@ -18,6 +19,8 @@ def get_depenses(db=Depends(get_db), user=Depends(get_current_user)):
 
 @router.post("/")
 def create_depense(data: dict, db=Depends(get_db), user=Depends(require_role("admin"))):
+    require_fields(data, ["date_depense", "type_depense", "montant"])
+    require_positive(data, ["montant"])
     cursor = db.cursor()
     cursor.execute("""
         INSERT INTO depense (date_depense, type_depense, montant, description)
@@ -35,6 +38,8 @@ def create_depense(data: dict, db=Depends(get_db), user=Depends(require_role("ad
 
 @router.put("/{depense_id}")
 def update_depense(depense_id: int, data: dict, db=Depends(get_db), user=Depends(require_role("admin"))):
+    require_fields(data, ["date_depense", "type_depense", "montant"])
+    require_positive(data, ["montant"])
     cursor = db.cursor()
     cursor.execute("""
         UPDATE depense

@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from database import get_db
 from auth import get_current_user
+from validation import require_fields
 
 router = APIRouter(prefix="/patients", tags=["Patients"])
 
@@ -24,6 +25,7 @@ def get_patient(patient_id: int, db=Depends(get_db), user=Depends(get_current_us
 
 @router.post("/")
 def create_patient(patient: dict, db=Depends(get_db), user=Depends(get_current_user)):
+    require_fields(patient, ["nom", "prenom", "age", "sexe"])
     cursor = db.cursor()
     cursor.execute("""
         INSERT INTO patients (date_enregistrement, nom, prenom, age, sexe,
@@ -40,6 +42,7 @@ def create_patient(patient: dict, db=Depends(get_db), user=Depends(get_current_u
 
 @router.put("/{patient_id}")
 def update_patient(patient_id: int, patient: dict, db=Depends(get_db), user=Depends(get_current_user)):
+    require_fields(patient, ["nom", "prenom", "age", "sexe"])
     cursor = db.cursor()
     cursor.execute("""
         UPDATE patients

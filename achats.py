@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from datetime import datetime
 from database import get_db
 from auth import get_current_user, require_role
+from validation import require_fields, require_positive
 
 router = APIRouter(prefix="/achats", tags=["Achats"])
 
@@ -61,8 +62,19 @@ def _insert_lignes(cursor, achat_id, lignes):
         })
 
 
+def _validate_achat(data: dict):
+    require_fields(data, ["date_achat"])
+    lignes = data.get("lignes", [])
+    if not lignes:
+        raise HTTPException(status_code=400, detail="Champ(s) obligatoire(s) manquant(s) : lignes (au moins un article)")
+    for ligne in lignes:
+        require_fields(ligne, ["designation"])
+        require_positive(ligne, ["quantite", "prix_unitaire"])
+
+
 @router.post("/")
 def create_achat(data: dict, db=Depends(get_db), user=Depends(require_role("admin"))):
+    _validate_achat(data)
     cursor = db.cursor()
     lignes = data.get("lignes", [])
     montant_total = sum(l.get("quantite", 1) * l.get("prix_unitaire", 0) for l in lignes)
@@ -90,6 +102,7 @@ def create_achat(data: dict, db=Depends(get_db), user=Depends(require_role("admi
 
 @router.put("/{achat_id}")
 def update_achat(achat_id: int, data: dict, db=Depends(get_db), user=Depends(require_role("admin"))):
+    _validate_achat(data)
     cursor = db.cursor()
     lignes = data.get("lignes", [])
     montant_total = sum(l.get("quantite", 1) * l.get("prix_unitaire", 0) for l in lignes)

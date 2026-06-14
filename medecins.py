@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 import psycopg2
 from database import get_db
 from auth import get_current_user, require_role
+from validation import require_fields
 
 router = APIRouter(prefix="/medecins", tags=["Médecins"])
 
@@ -25,6 +26,7 @@ def get_medecin(medecin_id: int, db=Depends(get_db), user=Depends(get_current_us
 
 @router.post("/")
 def create_medecin(data: dict, db=Depends(get_db), user=Depends(require_role("admin"))):
+    require_fields(data, ["nom"])
     cursor = db.cursor()
     cursor.execute("INSERT INTO medecin (nom) VALUES (%(nom)s) RETURNING id", {"nom": data["nom"]})
     db.commit()
@@ -33,6 +35,7 @@ def create_medecin(data: dict, db=Depends(get_db), user=Depends(require_role("ad
 
 @router.put("/{medecin_id}")
 def update_medecin(medecin_id: int, data: dict, db=Depends(get_db), user=Depends(require_role("admin"))):
+    require_fields(data, ["nom"])
     cursor = db.cursor()
     cursor.execute("UPDATE medecin SET nom = %(nom)s WHERE id = %(id)s", {"nom": data["nom"], "id": medecin_id})
     if cursor.rowcount == 0:

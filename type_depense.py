@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from database import get_db
 from auth import get_current_user, require_role
+from validation import require_fields
 
 router = APIRouter(prefix="/type-depense", tags=["Type Dépense"])
 
@@ -24,6 +25,7 @@ def get_type_depense(type_depense_id: int, db=Depends(get_db), user=Depends(get_
 
 @router.post("/")
 def create_type_depense(data: dict, db=Depends(get_db), user=Depends(require_role("admin"))):
+    require_fields(data, ["nom"])
     cursor = db.cursor()
     cursor.execute("""
         INSERT INTO type_depense (nom)
@@ -36,6 +38,7 @@ def create_type_depense(data: dict, db=Depends(get_db), user=Depends(require_rol
 
 @router.put("/{type_depense_id}")
 def update_type_depense(type_depense_id: int, data: dict, db=Depends(get_db), user=Depends(require_role("admin"))):
+    require_fields(data, ["nom"])
     cursor = db.cursor()
     cursor.execute("""
         UPDATE type_depense

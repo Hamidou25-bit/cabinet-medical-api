@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 import psycopg2
 from database import get_db
 from auth import get_current_user, require_role
+from validation import require_fields
 
 router = APIRouter(prefix="/fournisseurs", tags=["Fournisseurs"])
 
@@ -33,6 +34,7 @@ def get_fournisseur(fournisseur_id: int, db=Depends(get_db), user=Depends(get_cu
 
 @router.post("/")
 def create_fournisseur(data: dict, db=Depends(get_db), user=Depends(require_role("admin"))):
+    require_fields(data, ["nom"])
     cursor = db.cursor()
     cursor.execute("""
         INSERT INTO fournisseur (nom, type_article, telephone, adresse)
@@ -50,6 +52,7 @@ def create_fournisseur(data: dict, db=Depends(get_db), user=Depends(require_role
 
 @router.put("/{fournisseur_id}")
 def update_fournisseur(fournisseur_id: int, data: dict, db=Depends(get_db), user=Depends(require_role("admin"))):
+    require_fields(data, ["nom"])
     cursor = db.cursor()
     cursor.execute("""
         UPDATE fournisseur

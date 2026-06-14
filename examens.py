@@ -2,6 +2,7 @@ from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException
 from database import get_db
 from auth import get_current_user
+from validation import require_fields
 
 router = APIRouter(prefix="/examens-complementaires", tags=["Examens complémentaires"])
 
@@ -60,6 +61,7 @@ def get_examen(examen_id: int, db=Depends(get_db), user=Depends(get_current_user
 
 @router.post("/")
 def create_examen(data: dict, db=Depends(get_db), user=Depends(get_current_user)):
+    require_fields(data, ["patient_id", "sous_type_examen_id", "date_examen"])
     cursor = db.cursor()
     cursor.execute("""
         INSERT INTO examens_complementaires (patient_id, sous_type_examen_id, date_examen,
@@ -85,6 +87,7 @@ def create_examen(data: dict, db=Depends(get_db), user=Depends(get_current_user)
 
 @router.put("/{examen_id}")
 def update_examen(examen_id: int, data: dict, db=Depends(get_db), user=Depends(get_current_user)):
+    require_fields(data, ["patient_id", "sous_type_examen_id", "date_examen"])
     cursor = db.cursor()
     cursor.execute("""
         UPDATE examens_complementaires

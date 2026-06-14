@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from database import get_db
 from auth import get_current_user
+from validation import require_fields
 
 router = APIRouter(prefix="/ordonnances", tags=["Ordonnances"])
 
@@ -62,6 +63,9 @@ def get_ordonnance(ordonnance_id: int, db=Depends(get_db), user=Depends(get_curr
 
 @router.post("/")
 def create_ordonnance(data: dict, db=Depends(get_db), user=Depends(get_current_user)):
+    require_fields(data, ["patient_id", "date_ordonnance"])
+    for ligne in data.get("lignes", []):
+        require_fields(ligne, ["designation"])
     cursor = db.cursor()
     cursor.execute("""
         INSERT INTO ordonnance (patient_id, date_ordonnance, est_validee, is_interne, beneficiaire, motif)
@@ -103,6 +107,9 @@ def create_ordonnance(data: dict, db=Depends(get_db), user=Depends(get_current_u
 
 @router.put("/{ordonnance_id}")
 def update_ordonnance(ordonnance_id: int, data: dict, db=Depends(get_db), user=Depends(get_current_user)):
+    require_fields(data, ["patient_id", "date_ordonnance"])
+    for ligne in data.get("lignes", []):
+        require_fields(ligne, ["designation"])
     cursor = db.cursor()
     cursor.execute("""
         UPDATE ordonnance

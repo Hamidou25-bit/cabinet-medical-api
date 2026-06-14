@@ -2,6 +2,7 @@ from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException
 from database import get_db
 from auth import get_current_user
+from validation import require_fields, require_positive
 
 router = APIRouter(prefix="/stock", tags=["Stock"])
 
@@ -43,6 +44,7 @@ def get_alertes_peremption(db=Depends(get_db), user=Depends(get_current_user)):
 
 @router.post("/")
 def create_article(article: dict, db=Depends(get_db), user=Depends(get_current_user)):
+    require_fields(article, ["Designation", "Quantite", "PrixVente"])
     cursor = db.cursor()
     cursor.execute("""
         INSERT INTO stock ("DateEntree", "Type", "Designation", "Fournisseur",
@@ -71,6 +73,7 @@ def create_article(article: dict, db=Depends(get_db), user=Depends(get_current_u
 
 @router.put("/{stock_id}")
 def update_article(stock_id: int, article: dict, db=Depends(get_db), user=Depends(get_current_user)):
+    require_fields(article, ["Designation", "Quantite", "PrixVente"])
     cursor = db.cursor()
     cursor.execute("""
         UPDATE stock
@@ -120,6 +123,8 @@ def get_sorties(db=Depends(get_db), user=Depends(get_current_user)):
 
 @router.post("/sortie")
 def create_sortie(data: dict, db=Depends(get_db), user=Depends(get_current_user)):
+    require_fields(data, ["Designation", "QuantiteSortie"])
+    require_positive(data, ["QuantiteSortie"])
     cursor = db.cursor()
     cursor.execute('SELECT "PrixVente", "PrixAchat", "Quantite" FROM stock WHERE "Designation" = %s', (data["Designation"],))
     article = cursor.fetchone()
