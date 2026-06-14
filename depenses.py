@@ -1,6 +1,6 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from database import get_db
-from auth import get_current_user
+from auth import get_current_user, require_role
 
 router = APIRouter(prefix="/depenses", tags=["Dépenses"])
 
@@ -14,3 +14,53 @@ def get_depenses(db=Depends(get_db), user=Depends(get_current_user)):
         ORDER BY date_depense DESC, id_depense DESC
     """)
     return cursor.fetchall()
+
+
+@router.post("/")
+def create_depense(data: dict, db=Depends(get_db), user=Depends(require_role("admin"))):
+    cursor = db.cursor()
+    cursor.execute("""
+        INSERT INTO depense (date_depense, type_depense, montant, description)
+        VALUES (%(date_depense)s, %(type_depense)s, %(montant)s, %(description)s)
+        RETURNING id_depense
+    """, {
+        "date_depense": data["date_depense"],
+        "type_depense": data["type_depense"],
+        "montant": data["montant"],
+        "description": data.get("description"),
+    })
+    db.commit()
+    return {"message": "Dépense créée", "id_depense": cursor.fetchone()["id_depense"]}
+
+
+@router.put("/{depense_id}")
+def update_depense(depense_id: int, data: dict, db=Depends(get_db), user=Depends(require_role("admin"))):
+    cursor = db.cursor()
+    cursor.execute("""
+        UPDATE depense
+        SET date_depense = %(date_depense)s,
+            type_depense = %(type_depense)s,
+            montant = %(montant)s,
+            description = %(description)s
+        WHERE id_depense = %(id)s
+    """, {
+        "date_depense": data["date_depense"],
+        "type_depense": data["type_depense"],
+        "montant": data["montant"],
+        "description": data.get("description"),
+        "id": depense_id,
+    })
+    if cursor.rowcount == 0:
+        raise HTTPException(status_code=404, detail="Dépense non trouvée")
+    db.commit()
+    return {"message": "Dépense mise à jour"}
+
+
+@router.delete("/{depense_id}")
+def delete_depense(depense_id: int, db=Depends(get_db), user=Depends(require_role("admin"))):
+    cursor = db.cursor()
+    cursor.execute("DELETE FROM depense WHERE id_depense = %s", (depense_id,))
+    if cursor.rowcount == 0:
+        raise HTTPException(status_code=404, detail="Dépense non trouvée")
+    db.commit()
+    return {"message": "Dépense supprimée"}
