@@ -70,7 +70,7 @@ Tables principales : `patients`, `consultations`, `ordonnance`, `ligne_ordonnanc
 | Rendez-vous (liste + création) | ✅ |
 | Examens complémentaires | ❌ à faire |
 | Personnel | ❌ à faire |
-| Comptabilité | 🟡 en cours (`type_depense` CRUD admin, `depenses` lecture) |
+| Comptabilité | 🟡 en cours (`type_depense` CRUD admin, `depenses` lecture, `GET /comptabilite/synthese` recettes/dépenses/profit) |
 | Rapports | ❌ à faire |
 | CRUD Patients (modifier/supprimer) | ❌ à faire (colonne `supprime`) |
 | CRUD Stock (entrées/sorties) | ❌ à faire (table `sortie`) |
