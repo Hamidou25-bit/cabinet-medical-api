@@ -6,6 +6,9 @@ import stock
 import auth
 import ordonnances
 import rendez_vous
+import examens
+import personnel
+import medecins
 
 app = FastAPI(title="Cabinet Médical BabaMouneissa API")
 
@@ -22,6 +25,9 @@ app.include_router(consultations.router)
 app.include_router(stock.router)
 app.include_router(ordonnances.router)
 app.include_router(rendez_vous.router)
+app.include_router(examens.router)
+app.include_router(personnel.router)
+app.include_router(medecins.router)
 app.include_router(auth.router)
 
 @app.get("/")

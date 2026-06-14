@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from database import get_db
 from auth import get_current_user
 
@@ -49,12 +49,18 @@ def update_patient(patient_id: int, patient: dict, db=Depends(get_db), user=Depe
             adresse = %(adresse)s,
             profession = %(profession)s,
             ethnie = %(ethnie)s
-        WHERE id = %s
-    """, (
-        patient["nom"], patient["prenom"], patient["age"], patient["sexe"],
-        patient.get("telephone"), patient.get("adresse"), patient.get("profession"), patient.get("ethnie"),
-        patient_id
-    ))
+        WHERE id = %(id)s
+    """, {
+        "nom": patient["nom"],
+        "prenom": patient["prenom"],
+        "age": patient["age"],
+        "sexe": patient["sexe"],
+        "telephone": patient.get("telephone"),
+        "adresse": patient.get("adresse"),
+        "profession": patient.get("profession"),
+        "ethnie": patient.get("ethnie"),
+        "id": patient_id,
+    })
     if cursor.rowcount == 0:
         raise HTTPException(status_code=404, detail="Patient non trouvé")
     db.commit()
