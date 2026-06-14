@@ -10,7 +10,8 @@ def get_stock(db=Depends(get_db), user=Depends(get_current_user)):
     cursor = db.cursor()
     cursor.execute("""
         SELECT "idStock", "DateEntree", "Type", "Designation", "Fournisseur",
-               "Quantite", "SeuilAlerte", "PrixVente", "PrixAchat"
+               "Quantite", "SeuilAlerte", "PrixVente", "PrixAchat",
+               "Dosage", "Forme", "DatePeremption"
         FROM stock
         ORDER BY "Designation"
     """)
@@ -27,16 +28,43 @@ def get_alertes(db=Depends(get_db), user=Depends(get_current_user)):
     """)
     return cursor.fetchall()
 
+@router.get("/alertes-peremption")
+def get_alertes_peremption(db=Depends(get_db), user=Depends(get_current_user)):
+    cursor = db.cursor()
+    cursor.execute("""
+        SELECT "idStock", "Designation", "DatePeremption"
+        FROM stock
+        WHERE "DatePeremption" IS NOT NULL
+          AND "DatePeremption" <> ''
+          AND "DatePeremption"::date <= CURRENT_DATE + INTERVAL '30 days'
+        ORDER BY "DatePeremption"
+    """)
+    return cursor.fetchall()
+
 @router.post("/")
 def create_article(article: dict, db=Depends(get_db), user=Depends(get_current_user)):
     cursor = db.cursor()
     cursor.execute("""
         INSERT INTO stock ("DateEntree", "Type", "Designation", "Fournisseur",
-                          "Quantite", "SeuilAlerte", "PrixVente", "PrixAchat")
+                          "Quantite", "SeuilAlerte", "PrixVente", "PrixAchat",
+                          "Dosage", "Forme", "DatePeremption")
         VALUES (%(DateEntree)s, %(Type)s, %(Designation)s, %(Fournisseur)s,
-                %(Quantite)s, %(SeuilAlerte)s, %(PrixVente)s, %(PrixAchat)s)
+                %(Quantite)s, %(SeuilAlerte)s, %(PrixVente)s, %(PrixAchat)s,
+                %(Dosage)s, %(Forme)s, %(DatePeremption)s)
         RETURNING "idStock"
-    """, article)
+    """, {
+        "DateEntree": article.get("DateEntree"),
+        "Type": article.get("Type"),
+        "Designation": article.get("Designation"),
+        "Fournisseur": article.get("Fournisseur"),
+        "Quantite": article.get("Quantite"),
+        "SeuilAlerte": article.get("SeuilAlerte"),
+        "PrixVente": article.get("PrixVente"),
+        "PrixAchat": article.get("PrixAchat"),
+        "Dosage": article.get("Dosage"),
+        "Forme": article.get("Forme"),
+        "DatePeremption": article.get("DatePeremption"),
+    })
     db.commit()
     return {"message": "Article créé", "id": cursor.fetchone()["idStock"]}
 
@@ -53,7 +81,10 @@ def update_article(stock_id: int, article: dict, db=Depends(get_db), user=Depend
             "Quantite" = %(Quantite)s,
             "SeuilAlerte" = %(SeuilAlerte)s,
             "PrixVente" = %(PrixVente)s,
-            "PrixAchat" = %(PrixAchat)s
+            "PrixAchat" = %(PrixAchat)s,
+            "Dosage" = %(Dosage)s,
+            "Forme" = %(Forme)s,
+            "DatePeremption" = %(DatePeremption)s
         WHERE "idStock" = %(idStock)s
     """, {
         "DateEntree": article.get("DateEntree"),
@@ -64,6 +95,9 @@ def update_article(stock_id: int, article: dict, db=Depends(get_db), user=Depend
         "SeuilAlerte": article.get("SeuilAlerte"),
         "PrixVente": article.get("PrixVente"),
         "PrixAchat": article.get("PrixAchat"),
+        "Dosage": article.get("Dosage"),
+        "Forme": article.get("Forme"),
+        "DatePeremption": article.get("DatePeremption"),
         "idStock": stock_id,
     })
     if cursor.rowcount == 0:
