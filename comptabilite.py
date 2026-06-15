@@ -29,7 +29,8 @@ def get_synthese(date_debut: str = None, date_fin: str = None, db=Depends(get_db
         SELECT COALESCE(SUM(lo.montant), 0) AS total
         FROM ligne_ordonnance lo
         JOIN ordonnance o ON o.id = lo.ordonnance_id
-        WHERE o.is_interne = 0
+        WHERE o.type_beneficiaire != 'interne'
+          AND lo.stock_id IS NOT NULL
           AND lo.date_ordonnance BETWEEN %(debut)s AND %(fin)s
     """, params)
     recettes_ordonnances = cursor.fetchone()["total"]
@@ -77,7 +78,8 @@ def get_synthese(date_debut: str = None, date_fin: str = None, db=Depends(get_db
             SELECT SUBSTRING(lo.date_ordonnance, 1, 7), lo.montant
             FROM ligne_ordonnance lo
             JOIN ordonnance o ON o.id = lo.ordonnance_id
-            WHERE o.is_interne = 0
+            WHERE o.type_beneficiaire != 'interne'
+              AND lo.stock_id IS NOT NULL
               AND lo.date_ordonnance BETWEEN %(debut)s AND %(fin)s
             UNION ALL
             SELECT SUBSTRING(date_soin, 1, 7), montant_total

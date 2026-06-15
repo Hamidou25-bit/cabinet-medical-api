@@ -10,7 +10,7 @@ router = APIRouter(prefix="/ordonnances", tags=["Ordonnances"])
 def get_ordonnances(db=Depends(get_db), user=Depends(get_current_user)):
     cursor = db.cursor()
     cursor.execute("""
-        SELECT o.id, o.date_ordonnance, o.est_validee, o.is_interne,
+        SELECT o.id, o.date_ordonnance, o.est_validee, o.type_beneficiaire,
                o.beneficiaire, o.motif, o.patient_id,
                p.nom, p.prenom
         FROM ordonnance o
@@ -68,14 +68,14 @@ def create_ordonnance(data: dict, db=Depends(get_db), user=Depends(get_current_u
         require_fields(ligne, ["designation"])
     cursor = db.cursor()
     cursor.execute("""
-        INSERT INTO ordonnance (patient_id, date_ordonnance, est_validee, is_interne, beneficiaire, motif)
-        VALUES (%(patient_id)s, %(date_ordonnance)s, %(est_validee)s, %(is_interne)s, %(beneficiaire)s, %(motif)s)
+        INSERT INTO ordonnance (patient_id, date_ordonnance, est_validee, type_beneficiaire, beneficiaire, motif)
+        VALUES (%(patient_id)s, %(date_ordonnance)s, %(est_validee)s, %(type_beneficiaire)s, %(beneficiaire)s, %(motif)s)
         RETURNING id
     """, {
         "patient_id": data["patient_id"],
         "date_ordonnance": data["date_ordonnance"],
         "est_validee": data.get("est_validee", 0),
-        "is_interne": data.get("is_interne", 0),
+        "type_beneficiaire": data.get("type_beneficiaire", "patient"),
         "beneficiaire": data.get("beneficiaire"),
         "motif": data.get("motif"),
     })
@@ -116,7 +116,7 @@ def update_ordonnance(ordonnance_id: int, data: dict, db=Depends(get_db), user=D
         SET patient_id = %(patient_id)s,
             date_ordonnance = %(date_ordonnance)s,
             est_validee = %(est_validee)s,
-            is_interne = %(is_interne)s,
+            type_beneficiaire = %(type_beneficiaire)s,
             beneficiaire = %(beneficiaire)s,
             motif = %(motif)s
         WHERE id = %(id)s
@@ -124,7 +124,7 @@ def update_ordonnance(ordonnance_id: int, data: dict, db=Depends(get_db), user=D
         "patient_id": data["patient_id"],
         "date_ordonnance": data["date_ordonnance"],
         "est_validee": data.get("est_validee", 0),
-        "is_interne": data.get("is_interne", 0),
+        "type_beneficiaire": data.get("type_beneficiaire", "patient"),
         "beneficiaire": data.get("beneficiaire"),
         "motif": data.get("motif"),
         "id": ordonnance_id,
