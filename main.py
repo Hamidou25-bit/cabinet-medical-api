@@ -6,6 +6,8 @@ import stock
 import auth
 import ordonnances
 import examens
+import examens_categories
+import examens_types
 import personnel
 import medecins
 import fournisseurs
@@ -29,6 +31,8 @@ app.include_router(consultations.router)
 app.include_router(stock.router)
 app.include_router(ordonnances.router)
 app.include_router(examens.router)
+app.include_router(examens_categories.router)
+app.include_router(examens_types.router)
 app.include_router(personnel.router)
 app.include_router(medecins.router)
 app.include_router(fournisseurs.router)

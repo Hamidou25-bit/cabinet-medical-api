@@ -27,18 +27,6 @@ def get_examens(db=Depends(get_db), user=Depends(get_current_user)):
     return cursor.fetchall()
 
 
-@router.get("/refs/types")
-def get_types_examens(db=Depends(get_db), user=Depends(get_current_user)):
-    cursor = db.cursor()
-    cursor.execute("""
-        SELECT ste.id, ste.nom, ste.tarif, ste.type_examen_id, te.nom AS type_nom
-        FROM sous_type_examen ste
-        LEFT JOIN type_examen te ON ste.type_examen_id = te.id
-        ORDER BY te.nom, ste.nom
-    """)
-    return cursor.fetchall()
-
-
 @router.get("/{examen_id}")
 def get_examen(examen_id: int, db=Depends(get_db), user=Depends(get_current_user)):
     cursor = db.cursor()

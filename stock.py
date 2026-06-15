@@ -109,18 +109,6 @@ def update_article(stock_id: int, article: dict, db=Depends(get_db), user=Depend
     return {"message": "Article mis à jour"}
 
 
-@router.get("/sorties")
-def get_sorties(db=Depends(get_db), user=Depends(get_current_user)):
-    cursor = db.cursor()
-    cursor.execute("""
-        SELECT "idSortie", "DateSortie", "Designation", "QuantiteSortie",
-               "PrixVente", "Montant", "Patient", "idOrdonnance", "PrixAchat"
-        FROM sortie
-        ORDER BY "idSortie" DESC
-    """)
-    return cursor.fetchall()
-
-
 @router.post("/sortie")
 def create_sortie(data: dict, db=Depends(get_db), user=Depends(get_current_user)):
     require_fields(data, ["Designation", "QuantiteSortie"])

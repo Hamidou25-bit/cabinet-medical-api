@@ -29,7 +29,7 @@ def get_synthese(date_debut: str = None, date_fin: str = None, db=Depends(get_db
         SELECT COALESCE(SUM(lo.montant), 0) AS total
         FROM ligne_ordonnance lo
         JOIN ordonnance o ON o.id = lo.ordonnance_id
-        WHERE o.type_beneficiaire != 'interne'
+        WHERE o.type_beneficiaire IN ('patient', 'tiers')
           AND o.est_validee = 1
           AND lo.stock_id IS NOT NULL
           AND lo.date_ordonnance BETWEEN %(debut)s AND %(fin)s
@@ -79,7 +79,7 @@ def get_synthese(date_debut: str = None, date_fin: str = None, db=Depends(get_db
             SELECT SUBSTRING(lo.date_ordonnance, 1, 7), lo.montant
             FROM ligne_ordonnance lo
             JOIN ordonnance o ON o.id = lo.ordonnance_id
-            WHERE o.type_beneficiaire != 'interne'
+            WHERE o.type_beneficiaire IN ('patient', 'tiers')
               AND o.est_validee = 1
               AND lo.stock_id IS NOT NULL
               AND lo.date_ordonnance BETWEEN %(debut)s AND %(fin)s
