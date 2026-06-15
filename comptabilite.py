@@ -37,7 +37,7 @@ def get_synthese(date_debut: str = None, date_fin: str = None, db=Depends(get_db
     recettes_ordonnances = cursor.fetchone()["total"]
 
     cursor.execute("""
-        SELECT COALESCE(SUM(montant_total), 0) AS total
+        SELECT COALESCE(SUM(prix_applique), 0) AS total
         FROM soins
         WHERE date_soin BETWEEN %(debut)s AND %(fin)s
     """, params)
@@ -84,7 +84,7 @@ def get_synthese(date_debut: str = None, date_fin: str = None, db=Depends(get_db
               AND lo.stock_id IS NOT NULL
               AND lo.date_ordonnance BETWEEN %(debut)s AND %(fin)s
             UNION ALL
-            SELECT SUBSTRING(date_soin, 1, 7), montant_total
+            SELECT SUBSTRING(date_soin::text, 1, 7), prix_applique
             FROM soins
             WHERE date_soin BETWEEN %(debut)s AND %(fin)s
             UNION ALL
