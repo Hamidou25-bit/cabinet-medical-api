@@ -35,21 +35,103 @@ def _resoudre_ligne_ordonnance(cursor, ligne):
         "montant": montant,
         "prix_achat": prix_achat,
         "stock_id": stock_id,
+        "quantite": quantite,
     }
 
 
+def _appliquer_mouvement_stock(cursor, stock_id, quantite, delta):
+    """Ajoute delta * quantite a la quantite en stock de l'article stock_id."""
+    if stock_id:
+        cursor.execute(
+            'UPDATE stock SET "Quantite" = "Quantite" + %s WHERE "idStock" = %s',
+            (delta * quantite, stock_id)
+        )
+
+
+def _decrementer_stock(cursor, lignes_resolues):
+    """Decremente le stock pour chaque ligne liee a un article (creation/modification d'ordonnance)."""
+    for ligne in lignes_resolues:
+        _appliquer_mouvement_stock(cursor, ligne["stock_id"], ligne["quantite"], -1)
+
+
+def _restaurer_stock_ordonnance(cursor, ordonnance_id):
+    """Reincremente le stock pour les lignes existantes d'une ordonnance (avant modification/suppression)."""
+    cursor.execute("SELECT stock_id, quantite FROM ligne_ordonnance WHERE ordonnance_id = %s", (ordonnance_id,))
+    for ligne in cursor.fetchall():
+        _appliquer_mouvement_stock(cursor, ligne["stock_id"], ligne["quantite"], 1)
+
+
+def _construire_filtres_ordonnances(type_beneficiaire, date_debut, date_fin):
+    """Construit la clause WHERE et les paramètres pour filtrer les ordonnances
+    par type de bénéficiaire et/ou période (date_ordonnance)."""
+    conditions = []
+    params = {}
+    if type_beneficiaire:
+        conditions.append("o.type_beneficiaire = %(type_beneficiaire)s")
+        params["type_beneficiaire"] = type_beneficiaire
+    if date_debut:
+        conditions.append("o.date_ordonnance >= %(date_debut)s")
+        params["date_debut"] = date_debut
+    if date_fin:
+        conditions.append("o.date_ordonnance <= %(date_fin)s")
+        params["date_fin"] = date_fin
+    where_clause = ("WHERE " + " AND ".join(conditions)) if conditions else ""
+    return where_clause, params
+
+
 @router.get("/")
-def get_ordonnances(db=Depends(get_db), user=Depends(get_current_user)):
+def get_ordonnances(type_beneficiaire: str = None, date_debut: str = None, date_fin: str = None,
+                     db=Depends(get_db), user=Depends(get_current_user)):
     cursor = db.cursor()
-    cursor.execute("""
+    where_clause, params = _construire_filtres_ordonnances(type_beneficiaire, date_debut, date_fin)
+    cursor.execute(f"""
+        SELECT o.id, o.date_ordonnance, o.est_validee, o.type_beneficiaire,
+               o.beneficiaire, o.motif, o.patient_id,
+               p.nom, p.prenom,
+               COALESCE(SUM(lo.montant), 0) AS montant_total
+        FROM ordonnance o
+        LEFT JOIN patients p ON o.patient_id = p.id
+        LEFT JOIN ligne_ordonnance lo ON lo.ordonnance_id = o.id
+        {where_clause}
+        GROUP BY o.id, o.date_ordonnance, o.est_validee, o.type_beneficiaire,
+                 o.beneficiaire, o.motif, o.patient_id, p.nom, p.prenom
+        ORDER BY o.date_ordonnance DESC, o.id DESC
+    """, params)
+    return cursor.fetchall()
+
+
+@router.get("/export")
+def export_ordonnances(type_beneficiaire: str = None, date_debut: str = None, date_fin: str = None,
+                        db=Depends(get_db), user=Depends(get_current_user)):
+    """Retourne les ordonnances (avec leurs lignes) correspondant aux filtres,
+    pour permettre la génération d'un export Excel détaillé côté frontend."""
+    cursor = db.cursor()
+    where_clause, params = _construire_filtres_ordonnances(type_beneficiaire, date_debut, date_fin)
+    cursor.execute(f"""
         SELECT o.id, o.date_ordonnance, o.est_validee, o.type_beneficiaire,
                o.beneficiaire, o.motif, o.patient_id,
                p.nom, p.prenom
         FROM ordonnance o
         LEFT JOIN patients p ON o.patient_id = p.id
+        {where_clause}
         ORDER BY o.date_ordonnance DESC, o.id DESC
-    """)
-    return cursor.fetchall()
+    """, params)
+    ordonnances = cursor.fetchall()
+
+    if ordonnances:
+        ids = [o["id"] for o in ordonnances]
+        cursor.execute("""
+            SELECT * FROM ligne_ordonnance WHERE ordonnance_id = ANY(%(ids)s) ORDER BY ordonnance_id, id
+        """, {"ids": ids})
+        lignes_par_ordonnance = {}
+        for ligne in cursor.fetchall():
+            lignes_par_ordonnance.setdefault(ligne["ordonnance_id"], []).append(ligne)
+
+        for o in ordonnances:
+            o["lignes"] = lignes_par_ordonnance.get(o["id"], [])
+            o["montant_total"] = sum((ligne["montant"] or 0) for ligne in o["lignes"])
+
+    return {"ordonnances": ordonnances}
 
 
 @router.get("/refs/dosages")
@@ -90,6 +172,7 @@ def get_ordonnance(ordonnance_id: int, db=Depends(get_db), user=Depends(get_curr
         SELECT * FROM ligne_ordonnance WHERE ordonnance_id = %s ORDER BY id
     """, (ordonnance_id,))
     ordonnance["lignes"] = cursor.fetchall()
+    ordonnance["montant_total"] = sum((ligne["montant"] or 0) for ligne in ordonnance["lignes"])
     return ordonnance
 
 
@@ -137,6 +220,8 @@ def create_ordonnance(data: dict, db=Depends(get_db), user=Depends(get_current_u
             "stock_id": resolue["stock_id"],
         })
 
+    _decrementer_stock(cursor, lignes_resolues)
+
     db.commit()
     return {"message": "Ordonnance créée", "id": ordonnance_id}
 
@@ -171,6 +256,7 @@ def update_ordonnance(ordonnance_id: int, data: dict, db=Depends(get_db), user=D
     if cursor.rowcount == 0:
         raise HTTPException(status_code=404, detail="Ordonnance non trouvée")
 
+    _restaurer_stock_ordonnance(cursor, ordonnance_id)
     cursor.execute("DELETE FROM ligne_ordonnance WHERE ordonnance_id = %s", (ordonnance_id,))
 
     for ligne, resolue in zip(lignes, lignes_resolues):
@@ -194,6 +280,8 @@ def update_ordonnance(ordonnance_id: int, data: dict, db=Depends(get_db), user=D
             "stock_id": resolue["stock_id"],
         })
 
+    _decrementer_stock(cursor, lignes_resolues)
+
     db.commit()
     return {"message": "Ordonnance mise à jour"}
 
@@ -201,9 +289,12 @@ def update_ordonnance(ordonnance_id: int, data: dict, db=Depends(get_db), user=D
 @router.delete("/{ordonnance_id}")
 def delete_ordonnance(ordonnance_id: int, db=Depends(get_db), user=Depends(get_current_user)):
     cursor = db.cursor()
+    cursor.execute("SELECT id FROM ordonnance WHERE id = %s", (ordonnance_id,))
+    if not cursor.fetchone():
+        raise HTTPException(status_code=404, detail="Ordonnance non trouvée")
+
+    _restaurer_stock_ordonnance(cursor, ordonnance_id)
     cursor.execute("DELETE FROM ligne_ordonnance WHERE ordonnance_id = %s", (ordonnance_id,))
     cursor.execute("DELETE FROM ordonnance WHERE id = %s", (ordonnance_id,))
-    if cursor.rowcount == 0:
-        raise HTTPException(status_code=404, detail="Ordonnance non trouvée")
     db.commit()
     return {"message": "Ordonnance supprimée"}
