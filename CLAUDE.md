@@ -27,7 +27,7 @@ cd api && uvicorn main:app --reload --port 8001
 
 ## Convention pour chaque nouveau module API
 
-Suivre le pattern de `ordonnances.py` / `rendez_vous.py` :
+Suivre le pattern de `ordonnances.py` :
 
 ```python
 from fastapi import APIRouter, Depends, HTTPException
@@ -47,7 +47,7 @@ def get_items(db=Depends(get_db), user=Depends(get_current_user)):
   import nom_module
   app.include_router(nom_module.router)
   ```
-- Le préfixe des routes peut contenir un tiret (ex: `/rendez-vous/`, pas `/rendez_vous/`) — toujours vérifier avec `curl` avant de tester depuis le frontend.
+- Le préfixe des routes peut contenir un tiret — toujours vérifier avec `curl` avant de tester depuis le frontend.
 
 ## Ordre des fonctions dans auth.py
 
@@ -57,6 +57,8 @@ def get_items(db=Depends(get_db), user=Depends(get_current_user)):
 
 Tables principales : `patients`, `consultations`, `ordonnance`, `ligne_ordonnance`, `rendez_vous`, `stock`, `sortie`, `achats`, `lignes_achat`, `comptabilite`, `depense`, `type_depense`, `personnel`, `utilisateurs`, `examens_complementaires`, `medecin`, `dosages`, `formes`, `fournisseur`, `materiel_cabinet`, `soins`, `dossier_patients`, `audit_logs`
 
+⚠️ La table `rendez_vous` est conservée en base mais n'est plus utilisée par l'API (module supprimé en Phase 7, voir CLAUDE.md racine).
+
 ## État des modules API
 
 | Module | Statut |
@@ -64,13 +66,13 @@ Tables principales : `patients`, `consultations`, `ordonnance`, `ligne_ordonnanc
 | Authentification | ✅ |
 | Dashboard | ✅ |
 | Patients (liste + création) | ✅ |
-| Consultations (liste) | ✅ |
+| Consultations (liste, champ `traitement_apres_diagnostic` supprimé) | ✅ |
 | Stock (liste + alertes) | ✅ |
-| Ordonnances (liste filtrable par type_beneficiaire/date + création + export Excel détaillé) | ✅ |
-| Rendez-vous (liste + création) | ✅ |
+| Ordonnances (liste filtrable par type_beneficiaire/date + création + export Excel détaillé + validation déclenchant les mouvements de stock via `stock_applique`) | ✅ |
+| Rendez-vous | ❌ supprimé (table conservée en base, non utilisée) |
 | Examens complémentaires | ❌ à faire |
 | Personnel | ❌ à faire |
-| Comptabilité | 🟡 en cours (`type_depense` CRUD admin, `depenses` lecture, `GET /comptabilite/synthese` recettes/dépenses/profit) |
+| Comptabilité | 🟡 en cours (`type_depense` CRUD admin, `depenses` lecture, `GET /comptabilite/synthese` recettes/dépenses/profit, recettes ordonnances limitées aux ordonnances validées) |
 | Rapports | ❌ à faire |
 | CRUD Patients (modifier/supprimer) | ❌ à faire (colonne `supprime`) |
 | CRUD Stock (entrées/sorties) | ❌ à faire (table `sortie`) |

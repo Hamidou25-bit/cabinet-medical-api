@@ -184,18 +184,21 @@ def create_ordonnance(data: dict, db=Depends(get_db), user=Depends(get_current_u
     cursor = db.cursor()
     lignes = data.get("lignes", [])
     lignes_resolues = [_resoudre_ligne_ordonnance(cursor, ligne) for ligne in lignes]
+    est_validee = data.get("est_validee", 0)
+    stock_applique = bool(est_validee)
 
     cursor.execute("""
-        INSERT INTO ordonnance (patient_id, date_ordonnance, est_validee, type_beneficiaire, beneficiaire, motif)
-        VALUES (%(patient_id)s, %(date_ordonnance)s, %(est_validee)s, %(type_beneficiaire)s, %(beneficiaire)s, %(motif)s)
+        INSERT INTO ordonnance (patient_id, date_ordonnance, est_validee, type_beneficiaire, beneficiaire, motif, stock_applique)
+        VALUES (%(patient_id)s, %(date_ordonnance)s, %(est_validee)s, %(type_beneficiaire)s, %(beneficiaire)s, %(motif)s, %(stock_applique)s)
         RETURNING id
     """, {
         "patient_id": data.get("patient_id"),
         "date_ordonnance": data["date_ordonnance"],
-        "est_validee": data.get("est_validee", 0),
+        "est_validee": est_validee,
         "type_beneficiaire": data.get("type_beneficiaire", "patient"),
         "beneficiaire": data.get("beneficiaire"),
         "motif": data.get("motif"),
+        "stock_applique": stock_applique,
     })
     ordonnance_id = cursor.fetchone()["id"]
 
@@ -220,7 +223,8 @@ def create_ordonnance(data: dict, db=Depends(get_db), user=Depends(get_current_u
             "stock_id": resolue["stock_id"],
         })
 
-    _decrementer_stock(cursor, lignes_resolues)
+    if stock_applique:
+        _decrementer_stock(cursor, lignes_resolues)
 
     db.commit()
     return {"message": "Ordonnance créée", "id": ordonnance_id}
@@ -232,8 +236,19 @@ def update_ordonnance(ordonnance_id: int, data: dict, db=Depends(get_db), user=D
     if data.get("type_beneficiaire", "patient") == "patient":
         require_fields(data, ["patient_id"])
     cursor = db.cursor()
+
+    cursor.execute("SELECT stock_applique FROM ordonnance WHERE id = %s", (ordonnance_id,))
+    existante = cursor.fetchone()
+    if not existante:
+        raise HTTPException(status_code=404, detail="Ordonnance non trouvée")
+
     lignes = data.get("lignes", [])
     lignes_resolues = [_resoudre_ligne_ordonnance(cursor, ligne) for ligne in lignes]
+    est_validee = data.get("est_validee", 0)
+    stock_applique = bool(est_validee)
+
+    if existante["stock_applique"]:
+        _restaurer_stock_ordonnance(cursor, ordonnance_id)
 
     cursor.execute("""
         UPDATE ordonnance
@@ -242,21 +257,20 @@ def update_ordonnance(ordonnance_id: int, data: dict, db=Depends(get_db), user=D
             est_validee = %(est_validee)s,
             type_beneficiaire = %(type_beneficiaire)s,
             beneficiaire = %(beneficiaire)s,
-            motif = %(motif)s
+            motif = %(motif)s,
+            stock_applique = %(stock_applique)s
         WHERE id = %(id)s
     """, {
         "patient_id": data.get("patient_id"),
         "date_ordonnance": data["date_ordonnance"],
-        "est_validee": data.get("est_validee", 0),
+        "est_validee": est_validee,
         "type_beneficiaire": data.get("type_beneficiaire", "patient"),
         "beneficiaire": data.get("beneficiaire"),
         "motif": data.get("motif"),
+        "stock_applique": stock_applique,
         "id": ordonnance_id,
     })
-    if cursor.rowcount == 0:
-        raise HTTPException(status_code=404, detail="Ordonnance non trouvée")
 
-    _restaurer_stock_ordonnance(cursor, ordonnance_id)
     cursor.execute("DELETE FROM ligne_ordonnance WHERE ordonnance_id = %s", (ordonnance_id,))
 
     for ligne, resolue in zip(lignes, lignes_resolues):
@@ -280,7 +294,8 @@ def update_ordonnance(ordonnance_id: int, data: dict, db=Depends(get_db), user=D
             "stock_id": resolue["stock_id"],
         })
 
-    _decrementer_stock(cursor, lignes_resolues)
+    if stock_applique:
+        _decrementer_stock(cursor, lignes_resolues)
 
     db.commit()
     return {"message": "Ordonnance mise à jour"}
@@ -289,11 +304,13 @@ def update_ordonnance(ordonnance_id: int, data: dict, db=Depends(get_db), user=D
 @router.delete("/{ordonnance_id}")
 def delete_ordonnance(ordonnance_id: int, db=Depends(get_db), user=Depends(get_current_user)):
     cursor = db.cursor()
-    cursor.execute("SELECT id FROM ordonnance WHERE id = %s", (ordonnance_id,))
-    if not cursor.fetchone():
+    cursor.execute("SELECT stock_applique FROM ordonnance WHERE id = %s", (ordonnance_id,))
+    existante = cursor.fetchone()
+    if not existante:
         raise HTTPException(status_code=404, detail="Ordonnance non trouvée")
 
-    _restaurer_stock_ordonnance(cursor, ordonnance_id)
+    if existante["stock_applique"]:
+        _restaurer_stock_ordonnance(cursor, ordonnance_id)
     cursor.execute("DELETE FROM ligne_ordonnance WHERE ordonnance_id = %s", (ordonnance_id,))
     cursor.execute("DELETE FROM ordonnance WHERE id = %s", (ordonnance_id,))
     db.commit()

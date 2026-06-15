@@ -10,7 +10,7 @@ def get_consultations(db=Depends(get_db), user=Depends(get_current_user)):
     cursor = db.cursor()
     cursor.execute("""
         SELECT c.id, c.date_consult, c.prix_unitaire, c.montant_total,
-               c.motif, c.diagnostic, c.observation, c.traitement_apres_diagnostic,
+               c.motif, c.diagnostic, c.observation,
                c.patient_id, c.medecin_id,
                p.nom, p.prenom,
                m.nom AS medecin_nom
@@ -42,11 +42,9 @@ def create_consultation(consultation: dict, db=Depends(get_db), user=Depends(get
     cursor = db.cursor()
     cursor.execute("""
         INSERT INTO consultations (date_consult, prix_unitaire, montant_total,
-                                  patient_id, medecin_id, motif, diagnostic, observation,
-                                  traitement_apres_diagnostic)
+                                  patient_id, medecin_id, motif, diagnostic, observation)
         VALUES (%(date_consult)s, %(prix_unitaire)s, %(montant_total)s,
-                %(patient_id)s, %(medecin_id)s, %(motif)s, %(diagnostic)s, %(observation)s,
-                %(traitement_apres_diagnostic)s)
+                %(patient_id)s, %(medecin_id)s, %(motif)s, %(diagnostic)s, %(observation)s)
         RETURNING id
     """, {
         "date_consult": consultation["date_consult"],
@@ -57,7 +55,6 @@ def create_consultation(consultation: dict, db=Depends(get_db), user=Depends(get
         "motif": consultation.get("motif"),
         "diagnostic": consultation.get("diagnostic"),
         "observation": consultation.get("observation"),
-        "traitement_apres_diagnostic": consultation.get("traitement_apres_diagnostic"),
     })
     db.commit()
     return {"message": "Consultation créée", "id": cursor.fetchone()["id"]}
@@ -76,8 +73,7 @@ def update_consultation(consultation_id: int, consultation: dict, db=Depends(get
             medecin_id = %(medecin_id)s,
             motif = %(motif)s,
             diagnostic = %(diagnostic)s,
-            observation = %(observation)s,
-            traitement_apres_diagnostic = %(traitement_apres_diagnostic)s
+            observation = %(observation)s
         WHERE id = %(id)s
     """, {
         "date_consult": consultation["date_consult"],
@@ -88,7 +84,6 @@ def update_consultation(consultation_id: int, consultation: dict, db=Depends(get
         "motif": consultation.get("motif"),
         "diagnostic": consultation.get("diagnostic"),
         "observation": consultation.get("observation"),
-        "traitement_apres_diagnostic": consultation.get("traitement_apres_diagnostic"),
         "id": consultation_id,
     })
     if cursor.rowcount == 0:
