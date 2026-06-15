@@ -55,7 +55,9 @@ def get_items(db=Depends(get_db), user=Depends(get_current_user)):
 
 ## Tables PostgreSQL pertinentes
 
-Tables principales : `patients`, `consultations`, `ordonnance`, `ligne_ordonnance`, `rendez_vous`, `stock`, `sortie`, `achats`, `lignes_achat`, `comptabilite`, `depense`, `type_depense`, `personnel`, `utilisateurs`, `examens_complementaires`, `medecin`, `dosages`, `formes`, `fournisseur`, `materiel_cabinet`, `soins`, `dossier_patients`, `audit_logs`
+Tables principales : `patients`, `consultations`, `ordonnance`, `ligne_ordonnance`, `rendez_vous`, `stock`, `sortie`, `achats`, `lignes_achat`, `comptabilite`, `depense`, `type_depense`, `personnel`, `utilisateurs`, `examens_complementaires`, `type_examen`, `sous_type_examen`, `medecin`, `dosages`, `formes`, `fournisseur`, `materiel_cabinet`, `soins`, `dossier_patients`, `audit_logs`
+
+⚠️ `type_examen` (catégories d'examens, colonnes `id`/`nom`) et `sous_type_examen` (types d'examens, colonnes `id`/`type_examen_id`/`nom`/`tarif`) existaient déjà avant la Phase 8 — pas de FK déclarée vers `examens_complementaires.sous_type_examen_id`, mais la suppression est protégée au niveau API (409 si référencé).
 
 ⚠️ La table `rendez_vous` est conservée en base mais n'est plus utilisée par l'API (module supprimé en Phase 7, voir CLAUDE.md racine).
 
@@ -67,15 +69,15 @@ Tables principales : `patients`, `consultations`, `ordonnance`, `ligne_ordonnanc
 | Dashboard | ✅ |
 | Patients (liste + création) | ✅ |
 | Consultations (liste, champ `traitement_apres_diagnostic` supprimé) | ✅ |
-| Stock (liste + alertes) | ✅ |
+| Stock (liste + alertes, `POST /stock/sortie`, `GET /stock/sorties` supprimé) | ✅ |
 | Ordonnances (liste filtrable par type_beneficiaire/date + création + export Excel détaillé + validation déclenchant les mouvements de stock via `stock_applique`) | ✅ |
 | Rendez-vous | ❌ supprimé (table conservée en base, non utilisée) |
-| Examens complémentaires | ❌ à faire |
+| Examens complémentaires (`examens-complementaires` CRUD + `examens-categories` + `examens-types` avec `tarif`) | ✅ |
 | Personnel | ❌ à faire |
-| Comptabilité | 🟡 en cours (`type_depense` CRUD admin, `depenses` lecture, `GET /comptabilite/synthese` recettes/dépenses/profit, recettes ordonnances limitées aux ordonnances validées) |
+| Comptabilité | 🟡 en cours (`type_depense` CRUD admin, `depenses` lecture, `GET /comptabilite/synthese` recettes/dépenses/profit, recettes ordonnances limitées aux ordonnances validées de type `patient`/`tiers`) |
 | Rapports | ❌ à faire |
 | CRUD Patients (modifier/supprimer) | ❌ à faire (colonne `supprime`) |
-| CRUD Stock (entrées/sorties) | ❌ à faire (table `sortie`) |
+| CRUD Stock (entrées/sorties) | 🟡 sortie via `POST /stock/sortie` (entrées via achats) |
 
 ## Déploiement
 
