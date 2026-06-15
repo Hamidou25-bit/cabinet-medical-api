@@ -95,7 +95,9 @@ def get_ordonnance(ordonnance_id: int, db=Depends(get_db), user=Depends(get_curr
 
 @router.post("/")
 def create_ordonnance(data: dict, db=Depends(get_db), user=Depends(get_current_user)):
-    require_fields(data, ["patient_id", "date_ordonnance"])
+    require_fields(data, ["date_ordonnance"])
+    if data.get("type_beneficiaire", "patient") == "patient":
+        require_fields(data, ["patient_id"])
     cursor = db.cursor()
     lignes = data.get("lignes", [])
     lignes_resolues = [_resoudre_ligne_ordonnance(cursor, ligne) for ligne in lignes]
@@ -105,7 +107,7 @@ def create_ordonnance(data: dict, db=Depends(get_db), user=Depends(get_current_u
         VALUES (%(patient_id)s, %(date_ordonnance)s, %(est_validee)s, %(type_beneficiaire)s, %(beneficiaire)s, %(motif)s)
         RETURNING id
     """, {
-        "patient_id": data["patient_id"],
+        "patient_id": data.get("patient_id"),
         "date_ordonnance": data["date_ordonnance"],
         "est_validee": data.get("est_validee", 0),
         "type_beneficiaire": data.get("type_beneficiaire", "patient"),
@@ -122,7 +124,7 @@ def create_ordonnance(data: dict, db=Depends(get_db), user=Depends(get_current_u
                     %(dosage)s, %(forme)s, %(quantite)s, %(posologie)s, %(duree_jours)s, %(montant)s, %(prix_achat)s, %(stock_id)s)
         """, {
             "ordonnance_id": ordonnance_id,
-            "patient_id": data["patient_id"],
+            "patient_id": data.get("patient_id"),
             "date_ordonnance": data["date_ordonnance"],
             "designation": resolue["designation"],
             "dosage": ligne.get("dosage"),
@@ -141,7 +143,9 @@ def create_ordonnance(data: dict, db=Depends(get_db), user=Depends(get_current_u
 
 @router.put("/{ordonnance_id}")
 def update_ordonnance(ordonnance_id: int, data: dict, db=Depends(get_db), user=Depends(get_current_user)):
-    require_fields(data, ["patient_id", "date_ordonnance"])
+    require_fields(data, ["date_ordonnance"])
+    if data.get("type_beneficiaire", "patient") == "patient":
+        require_fields(data, ["patient_id"])
     cursor = db.cursor()
     lignes = data.get("lignes", [])
     lignes_resolues = [_resoudre_ligne_ordonnance(cursor, ligne) for ligne in lignes]
@@ -156,7 +160,7 @@ def update_ordonnance(ordonnance_id: int, data: dict, db=Depends(get_db), user=D
             motif = %(motif)s
         WHERE id = %(id)s
     """, {
-        "patient_id": data["patient_id"],
+        "patient_id": data.get("patient_id"),
         "date_ordonnance": data["date_ordonnance"],
         "est_validee": data.get("est_validee", 0),
         "type_beneficiaire": data.get("type_beneficiaire", "patient"),
@@ -177,7 +181,7 @@ def update_ordonnance(ordonnance_id: int, data: dict, db=Depends(get_db), user=D
                     %(dosage)s, %(forme)s, %(quantite)s, %(posologie)s, %(duree_jours)s, %(montant)s, %(prix_achat)s, %(stock_id)s)
         """, {
             "ordonnance_id": ordonnance_id,
-            "patient_id": data["patient_id"],
+            "patient_id": data.get("patient_id"),
             "date_ordonnance": data["date_ordonnance"],
             "designation": resolue["designation"],
             "dosage": ligne.get("dosage"),
