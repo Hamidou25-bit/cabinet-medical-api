@@ -66,7 +66,7 @@ Tables principales : `patients`, `consultations`, `ordonnance`, `ligne_ordonnanc
 | Patients (liste + création) | ✅ |
 | Consultations (liste) | ✅ |
 | Stock (liste + alertes) | ✅ |
-| Ordonnances (liste + création) | ✅ |
+| Ordonnances (liste filtrable par type_beneficiaire/date + création + export Excel détaillé) | ✅ |
 | Rendez-vous (liste + création) | ✅ |
 | Examens complémentaires | ❌ à faire |
 | Personnel | ❌ à faire |
