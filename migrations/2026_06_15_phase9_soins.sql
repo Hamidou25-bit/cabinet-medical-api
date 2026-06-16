@@ -17,6 +17,11 @@ ALTER TABLE soins ADD COLUMN IF NOT EXISTS prix_applique NUMERIC(10,2) NOT NULL 
 ALTER TABLE soins ADD COLUMN IF NOT EXISTS date_soin DATE;
 ALTER TABLE soins ADD COLUMN IF NOT EXISTS notes TEXT;
 
+-- Si patient_id existait déjà dans la table originale (SQLite migration) avec une contrainte NOT NULL,
+-- ADD COLUMN IF NOT EXISTS est silencieusement ignoré et la contrainte reste.
+-- On la retire explicitement pour permettre les soins de patients externes (patient_id = NULL).
+ALTER TABLE soins ALTER COLUMN patient_id DROP NOT NULL;
+
 -- 3. Types de soins par défaut
 INSERT INTO type_soin (nom, prix_defaut) VALUES
     ('Injection', 1000),

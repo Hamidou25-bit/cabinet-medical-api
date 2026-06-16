@@ -12,6 +12,7 @@ def get_examens(db=Depends(get_db), user=Depends(get_current_user)):
     cursor = db.cursor()
     cursor.execute("""
         SELECT e.id, e.date_examen, e.resultat, e.prix, e.patient_id,
+               e.nom_patient_externe,
                e.sous_type_examen_id, e.medecin_id, e.date_creation,
                e.renseignement_clinique,
                p.nom, p.prenom,
@@ -49,18 +50,23 @@ def get_examen(examen_id: int, db=Depends(get_db), user=Depends(get_current_user
 
 @router.post("/")
 def create_examen(data: dict, db=Depends(get_db), user=Depends(get_current_user)):
-    require_fields(data, ["patient_id", "sous_type_examen_id", "date_examen"])
+    require_fields(data, ["sous_type_examen_id", "date_examen"])
+    patient_id = data.get("patient_id")
+    nom_patient_externe = data.get("nom_patient_externe")
+    if not patient_id and not nom_patient_externe:
+        raise HTTPException(status_code=400, detail="Patient enregistré ou nom du patient externe requis")
     cursor = db.cursor()
     cursor.execute("""
-        INSERT INTO examens_complementaires (patient_id, sous_type_examen_id, date_examen,
-                                              resultat, prix, medecin_id, date_creation,
+        INSERT INTO examens_complementaires (patient_id, nom_patient_externe, sous_type_examen_id,
+                                              date_examen, resultat, prix, medecin_id, date_creation,
                                               renseignement_clinique)
-        VALUES (%(patient_id)s, %(sous_type_examen_id)s, %(date_examen)s,
+        VALUES (%(patient_id)s, %(nom_patient_externe)s, %(sous_type_examen_id)s, %(date_examen)s,
                 %(resultat)s, %(prix)s, %(medecin_id)s, %(date_creation)s,
                 %(renseignement_clinique)s)
         RETURNING id
     """, {
-        "patient_id": data["patient_id"],
+        "patient_id": patient_id,
+        "nom_patient_externe": nom_patient_externe,
         "sous_type_examen_id": data["sous_type_examen_id"],
         "date_examen": data["date_examen"],
         "resultat": data.get("resultat"),
@@ -75,11 +81,16 @@ def create_examen(data: dict, db=Depends(get_db), user=Depends(get_current_user)
 
 @router.put("/{examen_id}")
 def update_examen(examen_id: int, data: dict, db=Depends(get_db), user=Depends(get_current_user)):
-    require_fields(data, ["patient_id", "sous_type_examen_id", "date_examen"])
+    require_fields(data, ["sous_type_examen_id", "date_examen"])
+    patient_id = data.get("patient_id")
+    nom_patient_externe = data.get("nom_patient_externe")
+    if not patient_id and not nom_patient_externe:
+        raise HTTPException(status_code=400, detail="Patient enregistré ou nom du patient externe requis")
     cursor = db.cursor()
     cursor.execute("""
         UPDATE examens_complementaires
         SET patient_id = %(patient_id)s,
+            nom_patient_externe = %(nom_patient_externe)s,
             sous_type_examen_id = %(sous_type_examen_id)s,
             date_examen = %(date_examen)s,
             resultat = %(resultat)s,
@@ -88,7 +99,8 @@ def update_examen(examen_id: int, data: dict, db=Depends(get_db), user=Depends(g
             renseignement_clinique = %(renseignement_clinique)s
         WHERE id = %(id)s
     """, {
-        "patient_id": data["patient_id"],
+        "patient_id": patient_id,
+        "nom_patient_externe": nom_patient_externe,
         "sous_type_examen_id": data["sous_type_examen_id"],
         "date_examen": data["date_examen"],
         "resultat": data.get("resultat"),
