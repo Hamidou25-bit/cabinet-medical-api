@@ -74,8 +74,8 @@ def create_soin(data: dict, db=Depends(get_db), user=Depends(get_current_user)):
         raise HTTPException(status_code=400, detail="Patient enregistré ou nom du patient externe requis")
     cursor = db.cursor()
     cursor.execute("""
-        INSERT INTO soins (type_soin_id, patient_id, nom_patient_externe, prix_applique, date_soin, notes)
-        VALUES (%(type_soin_id)s, %(patient_id)s, %(nom_patient_externe)s, %(prix_applique)s, %(date_soin)s, %(notes)s)
+        INSERT INTO soins (type_soin_id, patient_id, nom_patient_externe, prix_applique, date_soin, notes, type_de_soins, montant_total)
+        VALUES (%(type_soin_id)s, %(patient_id)s, %(nom_patient_externe)s, %(prix_applique)s, %(date_soin)s, %(notes)s, '', 0)
         RETURNING id
     """, {
         "type_soin_id": data["type_soin_id"],

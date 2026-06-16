@@ -23,7 +23,7 @@ def get_synthese(date_debut: str = None, date_fin: str = None, db=Depends(get_db
         FROM consultations
         WHERE date_consult BETWEEN %(debut)s AND %(fin)s
     """, params)
-    recettes_consultations = cursor.fetchone()["total"]
+    recettes_consultations = float(cursor.fetchone()["total"])
 
     cursor.execute("""
         SELECT COALESCE(SUM(lo.montant), 0) AS total
@@ -34,21 +34,21 @@ def get_synthese(date_debut: str = None, date_fin: str = None, db=Depends(get_db
           AND lo.stock_id IS NOT NULL
           AND o.date_ordonnance BETWEEN %(debut)s AND %(fin)s
     """, params)
-    recettes_ordonnances = cursor.fetchone()["total"]
+    recettes_ordonnances = float(cursor.fetchone()["total"])
 
     cursor.execute("""
         SELECT COALESCE(SUM(prix_applique), 0) AS total
         FROM soins
         WHERE date_soin BETWEEN %(debut)s AND %(fin)s
     """, params)
-    recettes_soins = cursor.fetchone()["total"]
+    recettes_soins = float(cursor.fetchone()["total"])
 
     cursor.execute("""
         SELECT COALESCE(SUM(prix), 0) AS total
         FROM examens_complementaires
         WHERE date_examen BETWEEN %(debut)s AND %(fin)s
     """, params)
-    recettes_examens = cursor.fetchone()["total"]
+    recettes_examens = float(cursor.fetchone()["total"])
 
     cursor.execute("""
         SELECT COALESCE(SUM(montant), 0) AS total
@@ -56,7 +56,7 @@ def get_synthese(date_debut: str = None, date_fin: str = None, db=Depends(get_db
         WHERE date_depense BETWEEN %(debut)s AND %(fin)s
           AND type_depense = 'Achats Fournisseurs'
     """, params)
-    depenses_achats_fournisseurs = cursor.fetchone()["total"]
+    depenses_achats_fournisseurs = float(cursor.fetchone()["total"])
 
     cursor.execute("""
         SELECT COALESCE(SUM(montant), 0) AS total
@@ -64,7 +64,7 @@ def get_synthese(date_debut: str = None, date_fin: str = None, db=Depends(get_db
         WHERE date_depense BETWEEN %(debut)s AND %(fin)s
           AND type_depense != 'Achats Fournisseurs'
     """, params)
-    depenses_autres = cursor.fetchone()["total"]
+    depenses_autres = float(cursor.fetchone()["total"])
 
     depenses_total = depenses_achats_fournisseurs + depenses_autres
     recettes_total = recettes_consultations + recettes_ordonnances + recettes_soins + recettes_examens
@@ -94,7 +94,7 @@ def get_synthese(date_debut: str = None, date_fin: str = None, db=Depends(get_db
         ) recettes_par_mois
         GROUP BY mois
     """, params)
-    recettes_par_mois = {row["mois"]: row["recettes"] for row in cursor.fetchall()}
+    recettes_par_mois = {row["mois"]: float(row["recettes"]) for row in cursor.fetchall()}
 
     cursor.execute("""
         SELECT SUBSTRING(date_depense, 1, 7) AS mois, SUM(montant) AS depenses
@@ -102,7 +102,7 @@ def get_synthese(date_debut: str = None, date_fin: str = None, db=Depends(get_db
         WHERE date_depense BETWEEN %(debut)s AND %(fin)s
         GROUP BY mois
     """, params)
-    depenses_par_mois = {row["mois"]: row["depenses"] for row in cursor.fetchall()}
+    depenses_par_mois = {row["mois"]: float(row["depenses"]) for row in cursor.fetchall()}
 
     mois = sorted(set(recettes_par_mois) | set(depenses_par_mois))
     evolution = [
