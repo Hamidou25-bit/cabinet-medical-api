@@ -30,9 +30,9 @@ def get_synthese(date_debut: str = None, date_fin: str = None, db=Depends(get_db
         FROM ligne_ordonnance lo
         JOIN ordonnance o ON o.id = lo.ordonnance_id
         WHERE o.type_beneficiaire IN ('patient', 'tiers')
-          AND o.est_validee = 1
+          AND o.est_validee = true
           AND lo.stock_id IS NOT NULL
-          AND lo.date_ordonnance BETWEEN %(debut)s AND %(fin)s
+          AND o.date_ordonnance BETWEEN %(debut)s AND %(fin)s
     """, params)
     recettes_ordonnances = cursor.fetchone()["total"]
 
@@ -76,13 +76,13 @@ def get_synthese(date_debut: str = None, date_fin: str = None, db=Depends(get_db
             FROM consultations
             WHERE date_consult BETWEEN %(debut)s AND %(fin)s
             UNION ALL
-            SELECT SUBSTRING(lo.date_ordonnance, 1, 7), lo.montant
+            SELECT SUBSTRING(o.date_ordonnance::text, 1, 7), lo.montant
             FROM ligne_ordonnance lo
             JOIN ordonnance o ON o.id = lo.ordonnance_id
             WHERE o.type_beneficiaire IN ('patient', 'tiers')
-              AND o.est_validee = 1
+              AND o.est_validee = true
               AND lo.stock_id IS NOT NULL
-              AND lo.date_ordonnance BETWEEN %(debut)s AND %(fin)s
+              AND o.date_ordonnance BETWEEN %(debut)s AND %(fin)s
             UNION ALL
             SELECT SUBSTRING(date_soin::text, 1, 7), prix_applique
             FROM soins
