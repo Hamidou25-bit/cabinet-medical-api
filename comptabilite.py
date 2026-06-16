@@ -30,7 +30,7 @@ def get_synthese(date_debut: str = None, date_fin: str = None, db=Depends(get_db
         FROM ligne_ordonnance lo
         JOIN ordonnance o ON o.id = lo.ordonnance_id
         WHERE o.type_beneficiaire IN ('patient', 'tiers')
-          AND o.est_validee = true
+          AND o.est_validee = 1
           AND lo.stock_id IS NOT NULL
           AND o.date_ordonnance BETWEEN %(debut)s AND %(fin)s
     """, params)
@@ -80,7 +80,7 @@ def get_synthese(date_debut: str = None, date_fin: str = None, db=Depends(get_db
             FROM ligne_ordonnance lo
             JOIN ordonnance o ON o.id = lo.ordonnance_id
             WHERE o.type_beneficiaire IN ('patient', 'tiers')
-              AND o.est_validee = true
+              AND o.est_validee = 1
               AND lo.stock_id IS NOT NULL
               AND o.date_ordonnance BETWEEN %(debut)s AND %(fin)s
             UNION ALL
