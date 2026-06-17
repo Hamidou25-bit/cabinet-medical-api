@@ -6,11 +6,13 @@ from validation import require_fields
 router = APIRouter(prefix="/ordonnances", tags=["Ordonnances"])
 
 
-def _resoudre_ligne_ordonnance(cursor, ligne):
+def _resoudre_ligne_ordonnance(cursor, ligne, type_beneficiaire="patient"):
     """Résout designation, montant et prix_achat d'une ligne d'ordonnance.
     Si stock_id est renseigné, le montant et le prix d'achat sont calculés
-    à partir des prix du stock. Sinon (médicament externe), les valeurs
-    envoyées par le frontend sont conservées telles quelles."""
+    à partir des prix du stock. Pour l'usage interne, le montant (utilisé pour
+    le total) est basé sur le prix d'achat plutôt que le prix de vente.
+    Sinon (médicament externe), les valeurs envoyées par le frontend sont
+    conservées telles quelles."""
     stock_id = ligne.get("stock_id")
     designation = ligne.get("designation")
     quantite = ligne.get("quantite", 1)
@@ -24,8 +26,8 @@ def _resoudre_ligne_ordonnance(cursor, ligne):
             raise HTTPException(status_code=404, detail=f"Article de stock non trouvé (id {stock_id})")
         if not designation:
             designation = article["Designation"]
-        montant = quantite * (article["PrixVente"] or 0)
         prix_achat = quantite * (article["PrixAchat"] or 0)
+        montant = prix_achat if type_beneficiaire == "interne" else quantite * (article["PrixVente"] or 0)
 
     if not designation:
         raise HTTPException(status_code=400, detail="Champ(s) obligatoire(s) manquant(s) : designation")
@@ -182,8 +184,9 @@ def create_ordonnance(data: dict, db=Depends(get_db), user=Depends(get_current_u
     if data.get("type_beneficiaire", "patient") == "patient":
         require_fields(data, ["patient_id"])
     cursor = db.cursor()
+    type_beneficiaire = data.get("type_beneficiaire", "patient")
     lignes = data.get("lignes", [])
-    lignes_resolues = [_resoudre_ligne_ordonnance(cursor, ligne) for ligne in lignes]
+    lignes_resolues = [_resoudre_ligne_ordonnance(cursor, ligne, type_beneficiaire) for ligne in lignes]
     est_validee = data.get("est_validee", 0)
     stock_applique = bool(est_validee)
 
@@ -242,8 +245,9 @@ def update_ordonnance(ordonnance_id: int, data: dict, db=Depends(get_db), user=D
     if not existante:
         raise HTTPException(status_code=404, detail="Ordonnance non trouvée")
 
+    type_beneficiaire = data.get("type_beneficiaire", "patient")
     lignes = data.get("lignes", [])
-    lignes_resolues = [_resoudre_ligne_ordonnance(cursor, ligne) for ligne in lignes]
+    lignes_resolues = [_resoudre_ligne_ordonnance(cursor, ligne, type_beneficiaire) for ligne in lignes]
     est_validee = data.get("est_validee", 0)
     stock_applique = bool(est_validee)
 
