@@ -1,3 +1,4 @@
+from datetime import date
 from fastapi import APIRouter, Depends, HTTPException
 from database import get_db
 from auth import get_current_user
@@ -78,6 +79,17 @@ def get_dossier_patient(patient_id: int, db=Depends(get_db), user=Depends(get_cu
     """, (patient_id,))
     examens = cursor.fetchall()
 
+    cursor.execute("""
+        SELECT id, vaccin, date_administration, dose, prochain_rappel, observations
+        FROM vaccinations
+        WHERE patient_id = %s
+        ORDER BY date_administration DESC, id DESC
+    """, (patient_id,))
+    vaccinations = cursor.fetchall()
+    rappels_en_retard = sum(
+        1 for v in vaccinations if v["prochain_rappel"] and v["prochain_rappel"] < date.today()
+    )
+
     total_consultations = sum((c["montant_total"] or 0) for c in consultations)
     total_ordonnances = sum((o["total"] or 0) for o in ordonnances)
     total_soins = sum((s["prix_applique"] or 0) for s in soins)
@@ -97,11 +109,14 @@ def get_dossier_patient(patient_id: int, db=Depends(get_db), user=Depends(get_cu
         "ordonnances": ordonnances,
         "soins": soins,
         "examens": examens,
+        "vaccinations": vaccinations,
         "resume": {
             "nb_consultations": len(consultations),
             "nb_ordonnances": len(ordonnances),
             "nb_soins": len(soins),
             "nb_examens": len(examens),
+            "nb_vaccinations": len(vaccinations),
+            "rappels_vaccination_en_retard": rappels_en_retard,
             "total_depense_patient": total_consultations + total_ordonnances + total_soins + total_examens,
             "derniere_visite": derniere_visite,
         },
