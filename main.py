@@ -18,6 +18,7 @@ import comptabilite
 import type_soins
 import soins
 import utilisateurs
+import dossier
 
 app = FastAPI(title="Cabinet Médical BabaMouneissa API")
 
@@ -46,6 +47,7 @@ app.include_router(comptabilite.router)
 app.include_router(type_soins.router)
 app.include_router(soins.router)
 app.include_router(utilisateurs.router)
+app.include_router(dossier.router)
 app.include_router(auth.router)
 
 @app.get("/")
