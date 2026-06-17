@@ -1,0 +1,10 @@
+CREATE TABLE IF NOT EXISTS mutuelles (
+    id SERIAL PRIMARY KEY,
+    nom TEXT NOT NULL UNIQUE
+);
+
+ALTER TABLE consultations ADD COLUMN IF NOT EXISTS mode_paiement TEXT NOT NULL DEFAULT 'especes';
+ALTER TABLE consultations ADD COLUMN IF NOT EXISTS mutuelle_id INTEGER REFERENCES mutuelles(id);
+
+ALTER TABLE ordonnance ADD COLUMN IF NOT EXISTS mode_paiement TEXT NOT NULL DEFAULT 'especes';
+ALTER TABLE ordonnance ADD COLUMN IF NOT EXISTS mutuelle_id INTEGER REFERENCES mutuelles(id);

@@ -88,15 +88,17 @@ def get_ordonnances(type_beneficiaire: str = None, date_debut: str = None, date_
     where_clause, params = _construire_filtres_ordonnances(type_beneficiaire, date_debut, date_fin)
     cursor.execute(f"""
         SELECT o.id, o.date_ordonnance, o.est_validee, o.type_beneficiaire,
-               o.beneficiaire, o.motif, o.patient_id,
-               p.nom, p.prenom,
+               o.beneficiaire, o.motif, o.patient_id, o.mode_paiement, o.mutuelle_id,
+               p.nom, p.prenom, mu.nom AS mutuelle_nom,
                COALESCE(SUM(lo.montant), 0) AS montant_total
         FROM ordonnance o
         LEFT JOIN patients p ON o.patient_id = p.id
+        LEFT JOIN mutuelles mu ON o.mutuelle_id = mu.id
         LEFT JOIN ligne_ordonnance lo ON lo.ordonnance_id = o.id
         {where_clause}
         GROUP BY o.id, o.date_ordonnance, o.est_validee, o.type_beneficiaire,
-                 o.beneficiaire, o.motif, o.patient_id, p.nom, p.prenom
+                 o.beneficiaire, o.motif, o.patient_id, o.mode_paiement, o.mutuelle_id,
+                 p.nom, p.prenom, mu.nom
         ORDER BY o.date_ordonnance DESC, o.id DESC
     """, params)
     return cursor.fetchall()
@@ -111,10 +113,11 @@ def export_ordonnances(type_beneficiaire: str = None, date_debut: str = None, da
     where_clause, params = _construire_filtres_ordonnances(type_beneficiaire, date_debut, date_fin)
     cursor.execute(f"""
         SELECT o.id, o.date_ordonnance, o.est_validee, o.type_beneficiaire,
-               o.beneficiaire, o.motif, o.patient_id,
-               p.nom, p.prenom
+               o.beneficiaire, o.motif, o.patient_id, o.mode_paiement, o.mutuelle_id,
+               p.nom, p.prenom, mu.nom AS mutuelle_nom
         FROM ordonnance o
         LEFT JOIN patients p ON o.patient_id = p.id
+        LEFT JOIN mutuelles mu ON o.mutuelle_id = mu.id
         {where_clause}
         ORDER BY o.date_ordonnance DESC, o.id DESC
     """, params)
@@ -161,9 +164,10 @@ def get_medecins(db=Depends(get_db), user=Depends(get_current_user)):
 def get_ordonnance(ordonnance_id: int, db=Depends(get_db), user=Depends(get_current_user)):
     cursor = db.cursor()
     cursor.execute("""
-        SELECT o.*, p.nom, p.prenom
+        SELECT o.*, p.nom, p.prenom, mu.nom AS mutuelle_nom
         FROM ordonnance o
         LEFT JOIN patients p ON o.patient_id = p.id
+        LEFT JOIN mutuelles mu ON o.mutuelle_id = mu.id
         WHERE o.id = %s
     """, (ordonnance_id,))
     ordonnance = cursor.fetchone()
@@ -191,8 +195,8 @@ def create_ordonnance(data: dict, db=Depends(get_db), user=Depends(get_current_u
     stock_applique = bool(est_validee)
 
     cursor.execute("""
-        INSERT INTO ordonnance (patient_id, date_ordonnance, est_validee, type_beneficiaire, beneficiaire, motif, stock_applique)
-        VALUES (%(patient_id)s, %(date_ordonnance)s, %(est_validee)s, %(type_beneficiaire)s, %(beneficiaire)s, %(motif)s, %(stock_applique)s)
+        INSERT INTO ordonnance (patient_id, date_ordonnance, est_validee, type_beneficiaire, beneficiaire, motif, stock_applique, mode_paiement, mutuelle_id)
+        VALUES (%(patient_id)s, %(date_ordonnance)s, %(est_validee)s, %(type_beneficiaire)s, %(beneficiaire)s, %(motif)s, %(stock_applique)s, %(mode_paiement)s, %(mutuelle_id)s)
         RETURNING id
     """, {
         "patient_id": data.get("patient_id"),
@@ -202,6 +206,8 @@ def create_ordonnance(data: dict, db=Depends(get_db), user=Depends(get_current_u
         "beneficiaire": data.get("beneficiaire"),
         "motif": data.get("motif"),
         "stock_applique": stock_applique,
+        "mode_paiement": data.get("mode_paiement", "especes"),
+        "mutuelle_id": data.get("mutuelle_id"),
     })
     ordonnance_id = cursor.fetchone()["id"]
 
@@ -262,7 +268,9 @@ def update_ordonnance(ordonnance_id: int, data: dict, db=Depends(get_db), user=D
             type_beneficiaire = %(type_beneficiaire)s,
             beneficiaire = %(beneficiaire)s,
             motif = %(motif)s,
-            stock_applique = %(stock_applique)s
+            stock_applique = %(stock_applique)s,
+            mode_paiement = %(mode_paiement)s,
+            mutuelle_id = %(mutuelle_id)s
         WHERE id = %(id)s
     """, {
         "patient_id": data.get("patient_id"),
@@ -272,6 +280,8 @@ def update_ordonnance(ordonnance_id: int, data: dict, db=Depends(get_db), user=D
         "beneficiaire": data.get("beneficiaire"),
         "motif": data.get("motif"),
         "stock_applique": stock_applique,
+        "mode_paiement": data.get("mode_paiement", "especes"),
+        "mutuelle_id": data.get("mutuelle_id"),
         "id": ordonnance_id,
     })
 

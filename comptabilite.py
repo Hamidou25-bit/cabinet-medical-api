@@ -104,6 +104,25 @@ def get_synthese(date_debut: str = None, date_fin: str = None, db=Depends(get_db
     """, params)
     depenses_par_mois = {row["mois"]: float(row["depenses"]) for row in cursor.fetchall()}
 
+    cursor.execute("""
+        SELECT mode, COALESCE(SUM(montant), 0) AS total
+        FROM (
+            SELECT mode_paiement AS mode, montant_total AS montant
+            FROM consultations
+            WHERE date_consult BETWEEN %(debut)s AND %(fin)s
+            UNION ALL
+            SELECT o.mode_paiement, lo.montant
+            FROM ligne_ordonnance lo
+            JOIN ordonnance o ON o.id = lo.ordonnance_id
+            WHERE o.type_beneficiaire IN ('patient', 'tiers')
+              AND o.est_validee = 1
+              AND lo.stock_id IS NOT NULL
+              AND o.date_ordonnance BETWEEN %(debut)s AND %(fin)s
+        ) recettes_par_mode
+        GROUP BY mode
+    """, params)
+    recettes_par_mode_paiement = {row["mode"] or "especes": float(row["total"]) for row in cursor.fetchall()}
+
     mois = sorted(set(recettes_par_mois) | set(depenses_par_mois))
     evolution = [
         {
@@ -135,4 +154,5 @@ def get_synthese(date_debut: str = None, date_fin: str = None, db=Depends(get_db
         },
         "profit": recettes_total - depenses_total,
         "evolution": evolution,
+        "recettes_par_mode_paiement": recettes_par_mode_paiement,
     }

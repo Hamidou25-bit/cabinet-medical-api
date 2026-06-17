@@ -11,12 +11,14 @@ def get_consultations(db=Depends(get_db), user=Depends(get_current_user)):
     cursor.execute("""
         SELECT c.id, c.date_consult, c.prix_unitaire, c.montant_total,
                c.motif, c.diagnostic, c.observation,
-               c.patient_id, c.medecin_id,
+               c.patient_id, c.medecin_id, c.mode_paiement, c.mutuelle_id,
                p.nom, p.prenom,
-               m.nom AS medecin_nom
+               m.nom AS medecin_nom,
+               mu.nom AS mutuelle_nom
         FROM consultations c
         LEFT JOIN patients p ON c.patient_id = p.id
         LEFT JOIN medecin m ON c.medecin_id = m.id
+        LEFT JOIN mutuelles mu ON c.mutuelle_id = mu.id
         ORDER BY c.date_consult DESC, c.id DESC
     """)
     return cursor.fetchall()
@@ -25,10 +27,11 @@ def get_consultations(db=Depends(get_db), user=Depends(get_current_user)):
 def get_consultation(consultation_id: int, db=Depends(get_db), user=Depends(get_current_user)):
     cursor = db.cursor()
     cursor.execute("""
-        SELECT c.*, p.nom, p.prenom, m.nom AS medecin_nom
+        SELECT c.*, p.nom, p.prenom, m.nom AS medecin_nom, mu.nom AS mutuelle_nom
         FROM consultations c
         LEFT JOIN patients p ON c.patient_id = p.id
         LEFT JOIN medecin m ON c.medecin_id = m.id
+        LEFT JOIN mutuelles mu ON c.mutuelle_id = mu.id
         WHERE c.id = %s
     """, (consultation_id,))
     consultation = cursor.fetchone()
@@ -42,9 +45,11 @@ def create_consultation(consultation: dict, db=Depends(get_db), user=Depends(get
     cursor = db.cursor()
     cursor.execute("""
         INSERT INTO consultations (date_consult, prix_unitaire, montant_total,
-                                  patient_id, medecin_id, motif, diagnostic, observation)
+                                  patient_id, medecin_id, motif, diagnostic, observation,
+                                  mode_paiement, mutuelle_id)
         VALUES (%(date_consult)s, %(prix_unitaire)s, %(montant_total)s,
-                %(patient_id)s, %(medecin_id)s, %(motif)s, %(diagnostic)s, %(observation)s)
+                %(patient_id)s, %(medecin_id)s, %(motif)s, %(diagnostic)s, %(observation)s,
+                %(mode_paiement)s, %(mutuelle_id)s)
         RETURNING id
     """, {
         "date_consult": consultation["date_consult"],
@@ -55,6 +60,8 @@ def create_consultation(consultation: dict, db=Depends(get_db), user=Depends(get
         "motif": consultation.get("motif"),
         "diagnostic": consultation.get("diagnostic"),
         "observation": consultation.get("observation"),
+        "mode_paiement": consultation.get("mode_paiement", "especes"),
+        "mutuelle_id": consultation.get("mutuelle_id"),
     })
     db.commit()
     return {"message": "Consultation créée", "id": cursor.fetchone()["id"]}
@@ -73,7 +80,9 @@ def update_consultation(consultation_id: int, consultation: dict, db=Depends(get
             medecin_id = %(medecin_id)s,
             motif = %(motif)s,
             diagnostic = %(diagnostic)s,
-            observation = %(observation)s
+            observation = %(observation)s,
+            mode_paiement = %(mode_paiement)s,
+            mutuelle_id = %(mutuelle_id)s
         WHERE id = %(id)s
     """, {
         "date_consult": consultation["date_consult"],
@@ -84,6 +93,8 @@ def update_consultation(consultation_id: int, consultation: dict, db=Depends(get
         "motif": consultation.get("motif"),
         "diagnostic": consultation.get("diagnostic"),
         "observation": consultation.get("observation"),
+        "mode_paiement": consultation.get("mode_paiement", "especes"),
+        "mutuelle_id": consultation.get("mutuelle_id"),
         "id": consultation_id,
     })
     if cursor.rowcount == 0:
