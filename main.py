@@ -22,6 +22,7 @@ import dossier
 import dashboard
 import mutuelles
 import vaccinations
+import rendez_vous
 
 app = FastAPI(title="Cabinet Médical BabaMouneissa API")
 
@@ -54,6 +55,7 @@ app.include_router(dossier.router)
 app.include_router(dashboard.router)
 app.include_router(mutuelles.router)
 app.include_router(vaccinations.router)
+app.include_router(rendez_vous.router)
 app.include_router(auth.router)
 
 @app.get("/")

@@ -102,7 +102,7 @@ def get_rdv_aujourdhui(db=Depends(get_db), user=Depends(get_current_user)):
                p.nom, p.prenom
         FROM rendez_vous r
         LEFT JOIN patients p ON r.patient_id = p.id
-        WHERE r.date_heure_rdv LIKE %s AND r.statut <> 'annulé'
+        WHERE r.date_heure_rdv LIKE %s AND r.statut <> 'annule'
         ORDER BY r.date_heure_rdv
     """, (f"{today}%",))
     return cursor.fetchall()
