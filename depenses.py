@@ -1,7 +1,8 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from database import get_db
 from auth import get_current_user, require_role
 from validation import require_fields, require_positive
+from audit_log import log_audit
 
 router = APIRouter(prefix="/depenses", tags=["Dépenses"])
 
@@ -18,7 +19,7 @@ def get_depenses(db=Depends(get_db), user=Depends(get_current_user)):
 
 
 @router.post("/")
-def create_depense(data: dict, db=Depends(get_db), user=Depends(require_role("admin"))):
+def create_depense(data: dict, request: Request, db=Depends(get_db), user=Depends(require_role("admin"))):
     require_fields(data, ["date_depense", "type_depense", "montant"])
     require_positive(data, ["montant"])
     cursor = db.cursor()
@@ -33,11 +34,13 @@ def create_depense(data: dict, db=Depends(get_db), user=Depends(require_role("ad
         "description": data.get("description"),
     })
     db.commit()
-    return {"message": "Dépense créée", "id_depense": cursor.fetchone()["id_depense"]}
+    new_id = cursor.fetchone()["id_depense"]
+    log_audit(db, request, user, "CREATE", "depense", new_id, data)
+    return {"message": "Dépense créée", "id_depense": new_id}
 
 
 @router.put("/{depense_id}")
-def update_depense(depense_id: int, data: dict, db=Depends(get_db), user=Depends(require_role("admin"))):
+def update_depense(depense_id: int, data: dict, request: Request, db=Depends(get_db), user=Depends(require_role("admin"))):
     require_fields(data, ["date_depense", "type_depense", "montant"])
     require_positive(data, ["montant"])
     cursor = db.cursor()
@@ -64,11 +67,12 @@ def update_depense(depense_id: int, data: dict, db=Depends(get_db), user=Depends
     if cursor.rowcount == 0:
         raise HTTPException(status_code=404, detail="Dépense non trouvée")
     db.commit()
+    log_audit(db, request, user, "UPDATE", "depense", depense_id, data)
     return {"message": "Dépense mise à jour"}
 
 
 @router.delete("/{depense_id}")
-def delete_depense(depense_id: int, db=Depends(get_db), user=Depends(require_role("admin"))):
+def delete_depense(depense_id: int, request: Request, db=Depends(get_db), user=Depends(require_role("admin"))):
     cursor = db.cursor()
     cursor.execute("SELECT achat_id FROM depense WHERE id_depense = %s", (depense_id,))
     existing = cursor.fetchone()
@@ -78,4 +82,5 @@ def delete_depense(depense_id: int, db=Depends(get_db), user=Depends(require_rol
         raise HTTPException(status_code=400, detail="Cette dépense est générée automatiquement depuis un achat. Supprimez l'achat correspondant pour la supprimer.")
     cursor.execute("DELETE FROM depense WHERE id_depense = %s", (depense_id,))
     db.commit()
+    log_audit(db, request, user, "DELETE", "depense", depense_id, None)
     return {"message": "Dépense supprimée"}

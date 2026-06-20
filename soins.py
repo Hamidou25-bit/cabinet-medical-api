@@ -1,7 +1,8 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from database import get_db
 from auth import get_current_user
 from validation import require_fields
+from audit_log import log_audit
 
 router = APIRouter(prefix="/soins", tags=["Soins"])
 
@@ -66,7 +67,7 @@ def get_soin(soin_id: int, db=Depends(get_db), user=Depends(get_current_user)):
 
 
 @router.post("/")
-def create_soin(data: dict, db=Depends(get_db), user=Depends(get_current_user)):
+def create_soin(data: dict, request: Request, db=Depends(get_db), user=Depends(get_current_user)):
     require_fields(data, ["type_soin_id", "date_soin", "prix_applique"])
     patient_id = data.get("patient_id")
     nom_patient_externe = data.get("nom_patient_externe")
@@ -86,11 +87,13 @@ def create_soin(data: dict, db=Depends(get_db), user=Depends(get_current_user)):
         "notes": data.get("notes"),
     })
     db.commit()
-    return {"message": "Soin enregistré", "id": cursor.fetchone()["id"]}
+    new_id = cursor.fetchone()["id"]
+    log_audit(db, request, user, "CREATE", "soins", new_id, data)
+    return {"message": "Soin enregistré", "id": new_id}
 
 
 @router.put("/{soin_id}")
-def update_soin(soin_id: int, data: dict, db=Depends(get_db), user=Depends(get_current_user)):
+def update_soin(soin_id: int, data: dict, request: Request, db=Depends(get_db), user=Depends(get_current_user)):
     require_fields(data, ["type_soin_id", "date_soin", "prix_applique"])
     patient_id = data.get("patient_id")
     nom_patient_externe = data.get("nom_patient_externe")
@@ -118,14 +121,16 @@ def update_soin(soin_id: int, data: dict, db=Depends(get_db), user=Depends(get_c
     if cursor.rowcount == 0:
         raise HTTPException(status_code=404, detail="Soin non trouvé")
     db.commit()
+    log_audit(db, request, user, "UPDATE", "soins", soin_id, data)
     return {"message": "Soin mis à jour"}
 
 
 @router.delete("/{soin_id}")
-def delete_soin(soin_id: int, db=Depends(get_db), user=Depends(get_current_user)):
+def delete_soin(soin_id: int, request: Request, db=Depends(get_db), user=Depends(get_current_user)):
     cursor = db.cursor()
     cursor.execute("DELETE FROM soins WHERE id = %s", (soin_id,))
     if cursor.rowcount == 0:
         raise HTTPException(status_code=404, detail="Soin non trouvé")
     db.commit()
+    log_audit(db, request, user, "DELETE", "soins", soin_id, None)
     return {"message": "Soin supprimé"}

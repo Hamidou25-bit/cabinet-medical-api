@@ -2,7 +2,7 @@ import calendar
 from datetime import date, timedelta
 from fastapi import APIRouter, Depends
 from database import get_db
-from auth import get_current_user
+from auth import require_role
 
 router = APIRouter(prefix="/dashboard", tags=["Dashboard"])
 
@@ -23,7 +23,7 @@ def _recettes_periode(cursor, debut, fin):
 
 
 @router.get("/statistiques")
-def get_statistiques(db=Depends(get_db), user=Depends(get_current_user)):
+def get_statistiques(db=Depends(get_db), user=Depends(require_role("admin"))):
     cursor = db.cursor()
     today = date.today()
 
@@ -94,7 +94,7 @@ def get_statistiques(db=Depends(get_db), user=Depends(get_current_user)):
 
 
 @router.get("/rdv-aujourdhui")
-def get_rdv_aujourdhui(db=Depends(get_db), user=Depends(get_current_user)):
+def get_rdv_aujourdhui(db=Depends(get_db), user=Depends(require_role("admin"))):
     cursor = db.cursor()
     today = date.today().isoformat()
     cursor.execute("""

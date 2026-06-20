@@ -1,8 +1,9 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from datetime import datetime
 from database import get_db
 from auth import get_current_user, require_role
 from validation import require_fields, require_positive
+from audit_log import log_audit
 
 router = APIRouter(prefix="/achats", tags=["Achats"])
 
@@ -204,7 +205,7 @@ def _validate_achat(data: dict):
 
 
 @router.post("/")
-def create_achat(data: dict, db=Depends(get_db), user=Depends(require_role("admin"))):
+def create_achat(data: dict, request: Request, db=Depends(get_db), user=Depends(require_role("admin"))):
     _validate_achat(data)
     cursor = db.cursor()
     lignes = data.get("lignes", [])
@@ -230,11 +231,12 @@ def create_achat(data: dict, db=Depends(get_db), user=Depends(require_role("admi
     _upsert_depense_achat(cursor, achat_id, data["date_achat"], montant_total, fournisseur_nom, data.get("numero_facture"))
 
     db.commit()
+    log_audit(db, request, user, "CREATE", "achats", achat_id, data)
     return {"message": "Achat créé", "id": achat_id}
 
 
 @router.put("/{achat_id}")
-def update_achat(achat_id: int, data: dict, db=Depends(get_db), user=Depends(require_role("admin"))):
+def update_achat(achat_id: int, data: dict, request: Request, db=Depends(get_db), user=Depends(require_role("admin"))):
     _validate_achat(data)
     cursor = db.cursor()
     lignes = data.get("lignes", [])
@@ -270,11 +272,12 @@ def update_achat(achat_id: int, data: dict, db=Depends(get_db), user=Depends(req
     _upsert_depense_achat(cursor, achat_id, data["date_achat"], montant_total, fournisseur_nom, data.get("numero_facture"))
 
     db.commit()
+    log_audit(db, request, user, "UPDATE", "achats", achat_id, data)
     return {"message": "Achat mis à jour"}
 
 
 @router.delete("/{achat_id}")
-def delete_achat(achat_id: int, db=Depends(get_db), user=Depends(require_role("admin"))):
+def delete_achat(achat_id: int, request: Request, db=Depends(get_db), user=Depends(require_role("admin"))):
     cursor = db.cursor()
     cursor.execute("SELECT id FROM achats WHERE id = %s", (achat_id,))
     if not cursor.fetchone():
@@ -286,4 +289,5 @@ def delete_achat(achat_id: int, db=Depends(get_db), user=Depends(require_role("a
     cursor.execute("DELETE FROM lignes_achat WHERE achat_id = %s", (achat_id,))
     cursor.execute("DELETE FROM achats WHERE id = %s", (achat_id,))
     db.commit()
+    log_audit(db, request, user, "DELETE", "achats", achat_id, None)
     return {"message": "Achat supprimé"}

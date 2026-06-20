@@ -1,7 +1,8 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from database import get_db
 from auth import get_current_user
 from validation import require_fields
+from audit_log import log_audit
 
 router = APIRouter(prefix="/patients", tags=["Patients"])
 
@@ -24,7 +25,7 @@ def get_patient(patient_id: int, db=Depends(get_db), user=Depends(get_current_us
     return cursor.fetchone()
 
 @router.post("/")
-def create_patient(patient: dict, db=Depends(get_db), user=Depends(get_current_user)):
+def create_patient(patient: dict, request: Request, db=Depends(get_db), user=Depends(get_current_user)):
     require_fields(patient, ["nom", "prenom", "age", "sexe"])
     cursor = db.cursor()
     cursor.execute("""
@@ -37,11 +38,13 @@ def create_patient(patient: dict, db=Depends(get_db), user=Depends(get_current_u
         RETURNING id
     """, patient)
     db.commit()
-    return {"message": "Patient créé", "id": cursor.fetchone()["id"]}
+    new_id = cursor.fetchone()["id"]
+    log_audit(db, request, user, "CREATE", "patients", new_id, patient)
+    return {"message": "Patient créé", "id": new_id}
 
 
 @router.put("/{patient_id}")
-def update_patient(patient_id: int, patient: dict, db=Depends(get_db), user=Depends(get_current_user)):
+def update_patient(patient_id: int, patient: dict, request: Request, db=Depends(get_db), user=Depends(get_current_user)):
     require_fields(patient, ["nom", "prenom", "age", "sexe"])
     cursor = db.cursor()
     cursor.execute("""
@@ -73,14 +76,16 @@ def update_patient(patient_id: int, patient: dict, db=Depends(get_db), user=Depe
     if cursor.rowcount == 0:
         raise HTTPException(status_code=404, detail="Patient non trouvé")
     db.commit()
+    log_audit(db, request, user, "UPDATE", "patients", patient_id, patient)
     return {"message": "Patient mis à jour"}
 
 
 @router.delete("/{patient_id}")
-def delete_patient(patient_id: int, db=Depends(get_db), user=Depends(get_current_user)):
+def delete_patient(patient_id: int, request: Request, db=Depends(get_db), user=Depends(get_current_user)):
     cursor = db.cursor()
     cursor.execute("UPDATE patients SET supprime = 1 WHERE id = %s", (patient_id,))
     if cursor.rowcount == 0:
         raise HTTPException(status_code=404, detail="Patient non trouvé")
     db.commit()
+    log_audit(db, request, user, "DELETE", "patients", patient_id, None)
     return {"message": "Patient supprimé"}

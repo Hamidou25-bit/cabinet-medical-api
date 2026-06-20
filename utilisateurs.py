@@ -1,11 +1,12 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from database import get_db
 from auth import get_current_user
+from audit_log import log_audit
 import bcrypt
 
 router = APIRouter(prefix="/utilisateurs", tags=["Utilisateurs"])
 
-ROLES_VALIDES = {"admin", "medecin", "secretaire"}
+ROLES_VALIDES = {"admin", "medecin", "secretaire", "laborantin"}
 
 
 def require_admin(user=Depends(get_current_user)):
@@ -26,7 +27,7 @@ def list_utilisateurs(db=Depends(get_db), user=Depends(require_admin)):
 
 
 @router.post("/")
-def create_utilisateur(data: dict, db=Depends(get_db), user=Depends(require_admin)):
+def create_utilisateur(data: dict, request: Request, db=Depends(get_db), user=Depends(require_admin)):
     nom_utilisateur = (data.get("nom_utilisateur") or "").strip()
     mot_de_passe = data.get("mot_de_passe") or ""
     role = data.get("role") or ""
@@ -51,7 +52,13 @@ def create_utilisateur(data: dict, db=Depends(get_db), user=Depends(require_admi
             "role": role,
         })
         db.commit()
-        return {"message": "Utilisateur créé", "id": cursor.fetchone()["id"]}
+        new_id = cursor.fetchone()["id"]
+        log_audit(db, request, user, "CREATE", "utilisateurs", new_id, {
+            "nom_utilisateur": nom_utilisateur,
+            "nom_complet": nom_complet,
+            "role": role,
+        })
+        return {"message": "Utilisateur créé", "id": new_id}
     except Exception as e:
         db.rollback()
         if "unique" in str(e).lower() or "duplicate" in str(e).lower():
@@ -60,7 +67,7 @@ def create_utilisateur(data: dict, db=Depends(get_db), user=Depends(require_admi
 
 
 @router.put("/{utilisateur_id}")
-def update_utilisateur(utilisateur_id: int, data: dict, db=Depends(get_db), user=Depends(require_admin)):
+def update_utilisateur(utilisateur_id: int, data: dict, request: Request, db=Depends(get_db), user=Depends(require_admin)):
     nom_utilisateur = (data.get("nom_utilisateur") or "").strip()
     role = (data.get("role") or "").strip()
     nom_complet = (data.get("nom_complet") or "").strip()
@@ -87,6 +94,11 @@ def update_utilisateur(utilisateur_id: int, data: dict, db=Depends(get_db), user
         if cursor.rowcount == 0:
             raise HTTPException(status_code=404, detail="Utilisateur non trouvé")
         db.commit()
+        log_audit(db, request, user, "UPDATE", "utilisateurs", utilisateur_id, {
+            "nom_utilisateur": nom_utilisateur,
+            "nom_complet": nom_complet,
+            "role": role,
+        })
         return {"message": "Utilisateur mis à jour"}
     except HTTPException:
         raise
@@ -98,7 +110,7 @@ def update_utilisateur(utilisateur_id: int, data: dict, db=Depends(get_db), user
 
 
 @router.delete("/{utilisateur_id}")
-def delete_utilisateur(utilisateur_id: int, db=Depends(get_db), user=Depends(require_admin)):
+def delete_utilisateur(utilisateur_id: int, request: Request, db=Depends(get_db), user=Depends(require_admin)):
     if utilisateur_id == user.get("id"):
         raise HTTPException(status_code=403, detail="Impossible de supprimer votre propre compte")
     cursor = db.cursor()
@@ -107,11 +119,12 @@ def delete_utilisateur(utilisateur_id: int, db=Depends(get_db), user=Depends(req
         db.rollback()
         raise HTTPException(status_code=404, detail="Utilisateur non trouvé")
     db.commit()
+    log_audit(db, request, user, "DELETE", "utilisateurs", utilisateur_id, None)
     return {"message": "Utilisateur supprimé"}
 
 
 @router.put("/{utilisateur_id}/password")
-def change_password(utilisateur_id: int, data: dict, db=Depends(get_db), user=Depends(require_admin)):
+def change_password(utilisateur_id: int, data: dict, request: Request, db=Depends(get_db), user=Depends(require_admin)):
     mot_de_passe = data.get("mot_de_passe") or ""
     if not mot_de_passe:
         raise HTTPException(status_code=422, detail="Nouveau mot de passe requis")
@@ -125,4 +138,5 @@ def change_password(utilisateur_id: int, data: dict, db=Depends(get_db), user=De
         db.rollback()
         raise HTTPException(status_code=404, detail="Utilisateur non trouvé")
     db.commit()
+    log_audit(db, request, user, "UPDATE_PASSWORD", "utilisateurs", utilisateur_id, None)
     return {"message": "Mot de passe mis à jour"}

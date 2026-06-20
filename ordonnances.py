@@ -1,7 +1,8 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from database import get_db
 from auth import get_current_user
 from validation import require_fields
+from audit_log import log_audit
 
 router = APIRouter(prefix="/ordonnances", tags=["Ordonnances"])
 
@@ -183,7 +184,7 @@ def get_ordonnance(ordonnance_id: int, db=Depends(get_db), user=Depends(get_curr
 
 
 @router.post("/")
-def create_ordonnance(data: dict, db=Depends(get_db), user=Depends(get_current_user)):
+def create_ordonnance(data: dict, request: Request, db=Depends(get_db), user=Depends(get_current_user)):
     require_fields(data, ["date_ordonnance"])
     if data.get("type_beneficiaire", "patient") == "patient":
         require_fields(data, ["patient_id"])
@@ -236,11 +237,12 @@ def create_ordonnance(data: dict, db=Depends(get_db), user=Depends(get_current_u
         _decrementer_stock(cursor, lignes_resolues)
 
     db.commit()
+    log_audit(db, request, user, "CREATE", "ordonnance", ordonnance_id, data)
     return {"message": "Ordonnance créée", "id": ordonnance_id}
 
 
 @router.put("/{ordonnance_id}")
-def update_ordonnance(ordonnance_id: int, data: dict, db=Depends(get_db), user=Depends(get_current_user)):
+def update_ordonnance(ordonnance_id: int, data: dict, request: Request, db=Depends(get_db), user=Depends(get_current_user)):
     require_fields(data, ["date_ordonnance"])
     if data.get("type_beneficiaire", "patient") == "patient":
         require_fields(data, ["patient_id"])
@@ -312,11 +314,12 @@ def update_ordonnance(ordonnance_id: int, data: dict, db=Depends(get_db), user=D
         _decrementer_stock(cursor, lignes_resolues)
 
     db.commit()
+    log_audit(db, request, user, "UPDATE", "ordonnance", ordonnance_id, data)
     return {"message": "Ordonnance mise à jour"}
 
 
 @router.delete("/{ordonnance_id}")
-def delete_ordonnance(ordonnance_id: int, db=Depends(get_db), user=Depends(get_current_user)):
+def delete_ordonnance(ordonnance_id: int, request: Request, db=Depends(get_db), user=Depends(get_current_user)):
     cursor = db.cursor()
     cursor.execute("SELECT stock_applique FROM ordonnance WHERE id = %s", (ordonnance_id,))
     existante = cursor.fetchone()
@@ -328,4 +331,5 @@ def delete_ordonnance(ordonnance_id: int, db=Depends(get_db), user=Depends(get_c
     cursor.execute("DELETE FROM ligne_ordonnance WHERE ordonnance_id = %s", (ordonnance_id,))
     cursor.execute("DELETE FROM ordonnance WHERE id = %s", (ordonnance_id,))
     db.commit()
+    log_audit(db, request, user, "DELETE", "ordonnance", ordonnance_id, None)
     return {"message": "Ordonnance supprimée"}

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordBearer
 from pydantic import BaseModel
 from datetime import datetime, timedelta
@@ -6,6 +6,7 @@ import bcrypt
 import jwt
 from database import get_db
 from config import SECRET_KEY, ALGORITHM, ACCESS_TOKEN_EXPIRE_MINUTES
+from audit_log import log_audit
 
 router = APIRouter(prefix="/auth", tags=["Authentification"])
 
@@ -25,7 +26,7 @@ def create_access_token(data: dict):
 
 
 @router.post("/login")
-def login(data: LoginData, db=Depends(get_db)):
+def login(data: LoginData, request: Request, db=Depends(get_db)):
     cursor = db.cursor()
     cursor.execute(
         "SELECT * FROM utilisateurs WHERE nom_utilisateur = %s AND actif = true",
@@ -44,6 +45,8 @@ def login(data: LoginData, db=Depends(get_db)):
         "role": user["role"],
         "id": user["id"]
     })
+
+    log_audit(db, request, {"id": user["id"], "sub": user["nom_utilisateur"]}, "LOGIN", "utilisateurs", user["id"], None)
 
     return {
         "access_token": token,

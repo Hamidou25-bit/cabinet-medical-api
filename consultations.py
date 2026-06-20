@@ -1,7 +1,8 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from database import get_db
 from auth import get_current_user
 from validation import require_fields
+from audit_log import log_audit
 
 router = APIRouter(prefix="/consultations", tags=["Consultations"])
 
@@ -40,7 +41,7 @@ def get_consultation(consultation_id: int, db=Depends(get_db), user=Depends(get_
     return consultation
 
 @router.post("/")
-def create_consultation(consultation: dict, db=Depends(get_db), user=Depends(get_current_user)):
+def create_consultation(consultation: dict, request: Request, db=Depends(get_db), user=Depends(get_current_user)):
     require_fields(consultation, ["patient_id", "date_consult", "motif"])
     cursor = db.cursor()
     cursor.execute("""
@@ -64,11 +65,13 @@ def create_consultation(consultation: dict, db=Depends(get_db), user=Depends(get
         "mutuelle_id": consultation.get("mutuelle_id"),
     })
     db.commit()
-    return {"message": "Consultation créée", "id": cursor.fetchone()["id"]}
+    new_id = cursor.fetchone()["id"]
+    log_audit(db, request, user, "CREATE", "consultations", new_id, consultation)
+    return {"message": "Consultation créée", "id": new_id}
 
 
 @router.put("/{consultation_id}")
-def update_consultation(consultation_id: int, consultation: dict, db=Depends(get_db), user=Depends(get_current_user)):
+def update_consultation(consultation_id: int, consultation: dict, request: Request, db=Depends(get_db), user=Depends(get_current_user)):
     require_fields(consultation, ["patient_id", "date_consult", "motif"])
     cursor = db.cursor()
     cursor.execute("""
@@ -100,14 +103,16 @@ def update_consultation(consultation_id: int, consultation: dict, db=Depends(get
     if cursor.rowcount == 0:
         raise HTTPException(status_code=404, detail="Consultation non trouvée")
     db.commit()
+    log_audit(db, request, user, "UPDATE", "consultations", consultation_id, consultation)
     return {"message": "Consultation mise à jour"}
 
 
 @router.delete("/{consultation_id}")
-def delete_consultation(consultation_id: int, db=Depends(get_db), user=Depends(get_current_user)):
+def delete_consultation(consultation_id: int, request: Request, db=Depends(get_db), user=Depends(get_current_user)):
     cursor = db.cursor()
     cursor.execute("DELETE FROM consultations WHERE id = %s", (consultation_id,))
     if cursor.rowcount == 0:
         raise HTTPException(status_code=404, detail="Consultation non trouvée")
     db.commit()
+    log_audit(db, request, user, "DELETE", "consultations", consultation_id, None)
     return {"message": "Consultation supprimée"}
