@@ -7,11 +7,32 @@ from audit_log import log_audit
 router = APIRouter(prefix="/soins", tags=["Soins"])
 
 
+def inserer_soin(cursor, soin_data, ordonnance_id=None):
+    """Insère une ligne dans la table soins et retourne son id.
+    Réutilisé par la création directe (POST /soins) et par la saisie groupée
+    depuis le formulaire Ordonnance (api/ordonnances.py)."""
+    cursor.execute("""
+        INSERT INTO soins (type_soin_id, patient_id, nom_patient_externe, prix_applique, date_soin, notes, ordonnance_id, type_de_soins, montant_total)
+        VALUES (%(type_soin_id)s, %(patient_id)s, %(nom_patient_externe)s, %(prix_applique)s, %(date_soin)s, %(notes)s, %(ordonnance_id)s, '', 0)
+        RETURNING id
+    """, {
+        "type_soin_id": soin_data["type_soin_id"],
+        "patient_id": soin_data.get("patient_id"),
+        "nom_patient_externe": soin_data.get("nom_patient_externe"),
+        "prix_applique": soin_data["prix_applique"],
+        "date_soin": soin_data["date_soin"],
+        "notes": soin_data.get("notes"),
+        "ordonnance_id": ordonnance_id,
+    })
+    return cursor.fetchone()["id"]
+
+
 @router.get("/")
 def get_soins(
     type_patient: str = None,
     date_debut: str = None,
     date_fin: str = None,
+    ordonnance_id: int = None,
     db=Depends(get_db),
     user=Depends(get_current_user),
 ):
@@ -31,11 +52,14 @@ def get_soins(
     if date_fin:
         conditions.append("s.date_soin <= %(date_fin)s")
         params["date_fin"] = date_fin
+    if ordonnance_id:
+        conditions.append("s.ordonnance_id = %(ordonnance_id)s")
+        params["ordonnance_id"] = ordonnance_id
     where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
 
     cursor.execute(f"""
         SELECT s.id, s.date_soin, s.prix_applique, s.notes,
-               s.patient_id, s.nom_patient_externe,
+               s.patient_id, s.nom_patient_externe, s.ordonnance_id,
                p.nom AS patient_nom, p.prenom AS patient_prenom,
                ts.id AS type_soin_id, ts.nom AS type_soin_nom, ts.prix_defaut
         FROM soins s
@@ -74,20 +98,8 @@ def create_soin(data: dict, request: Request, db=Depends(get_db), user=Depends(g
     if not patient_id and not nom_patient_externe:
         raise HTTPException(status_code=400, detail="Patient enregistré ou nom du patient externe requis")
     cursor = db.cursor()
-    cursor.execute("""
-        INSERT INTO soins (type_soin_id, patient_id, nom_patient_externe, prix_applique, date_soin, notes, type_de_soins, montant_total)
-        VALUES (%(type_soin_id)s, %(patient_id)s, %(nom_patient_externe)s, %(prix_applique)s, %(date_soin)s, %(notes)s, '', 0)
-        RETURNING id
-    """, {
-        "type_soin_id": data["type_soin_id"],
-        "patient_id": patient_id,
-        "nom_patient_externe": nom_patient_externe,
-        "prix_applique": data["prix_applique"],
-        "date_soin": data["date_soin"],
-        "notes": data.get("notes"),
-    })
+    new_id = inserer_soin(cursor, data)
     db.commit()
-    new_id = cursor.fetchone()["id"]
     log_audit(db, request, user, "CREATE", "soins", new_id, data)
     return {"message": "Soin enregistré", "id": new_id}
 
