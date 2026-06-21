@@ -84,6 +84,9 @@ Tables principales : `patients`, `consultations`, `ordonnance`, `ligne_ordonnanc
 
 ## Déploiement
 
+**Automatique (GitHub Actions)** : tout push sur `main` déclenche `.github/workflows/deploy.yml`, qui se connecte en SSH au VPS avec une clé dédiée (secret `DEPLOY_SSH_KEY`, restreinte côté serveur via `command=` dans `authorized_keys` — elle ne peut exécuter que `/usr/local/bin/deploy-api.sh`, rien d'autre) puis vérifie que `https://cabinet-babamouneissa.com/api/` répond `{"status":"ok"}`. Secrets requis sur le dépôt GitHub : `DEPLOY_HOST`, `DEPLOY_USER`, `DEPLOY_SSH_KEY`. Le script serveur (`/usr/local/bin/deploy-api.sh`) ne touche jamais à `config.py` (exclu du dépôt via `.gitignore`).
+
+**Manuel (si besoin)** :
 ```bash
 cd /home/ubuntu/api && git pull && pm2 restart cabinet-api
 ```

@@ -31,7 +31,6 @@ def get_synthese(date_debut: str = None, date_fin: str = None, db=Depends(get_db
         JOIN ordonnance o ON o.id = lo.ordonnance_id
         WHERE o.type_beneficiaire IN ('patient', 'tiers')
           AND o.est_validee = 1
-          AND lo.stock_id IS NOT NULL
           AND o.date_ordonnance BETWEEN %(debut)s AND %(fin)s
     """, params)
     recettes_ordonnances = float(cursor.fetchone()["total"])
@@ -81,7 +80,6 @@ def get_synthese(date_debut: str = None, date_fin: str = None, db=Depends(get_db
             JOIN ordonnance o ON o.id = lo.ordonnance_id
             WHERE o.type_beneficiaire IN ('patient', 'tiers')
               AND o.est_validee = 1
-              AND lo.stock_id IS NOT NULL
               AND o.date_ordonnance BETWEEN %(debut)s AND %(fin)s
             UNION ALL
             SELECT SUBSTRING(date_soin::text, 1, 7), prix_applique
@@ -116,7 +114,6 @@ def get_synthese(date_debut: str = None, date_fin: str = None, db=Depends(get_db
             JOIN ordonnance o ON o.id = lo.ordonnance_id
             WHERE o.type_beneficiaire IN ('patient', 'tiers')
               AND o.est_validee = 1
-              AND lo.stock_id IS NOT NULL
               AND o.date_ordonnance BETWEEN %(debut)s AND %(fin)s
         ) recettes_par_mode
         GROUP BY mode
