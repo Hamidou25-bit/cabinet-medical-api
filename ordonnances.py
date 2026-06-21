@@ -42,6 +42,19 @@ def _resoudre_ligne_ordonnance(cursor, ligne, type_beneficiaire="patient"):
     }
 
 
+def _verifier_montants_avant_validation(lignes_resolues):
+    """Empêche de valider une ordonnance (est_validee=1) si une ligne contient
+    un médicament (quantité > 0) mais un montant à 0 — signe d'un prix de vente
+    manquant côté stock ou non saisi pour un médicament externe."""
+    designations_invalides = [l["designation"] for l in lignes_resolues if l["quantite"] > 0 and l["montant"] <= 0]
+    if designations_invalides:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Impossible de valider l'ordonnance : montant à 0 pour {', '.join(designations_invalides)}. "
+                   f"Vérifiez le prix de vente (stock) ou saisissez un montant manuel."
+        )
+
+
 def _appliquer_mouvement_stock(cursor, stock_id, quantite, delta):
     """Ajoute delta * quantite a la quantite en stock de l'article stock_id."""
     if stock_id:
@@ -197,6 +210,8 @@ def create_ordonnance(data: dict, request: Request, db=Depends(get_db), user=Dep
     lignes_resolues = [_resoudre_ligne_ordonnance(cursor, ligne, type_beneficiaire) for ligne in lignes]
     est_validee = data.get("est_validee", 0)
     stock_applique = bool(est_validee)
+    if est_validee:
+        _verifier_montants_avant_validation(lignes_resolues)
 
     cursor.execute("""
         INSERT INTO ordonnance (patient_id, date_ordonnance, est_validee, type_beneficiaire, beneficiaire, medecin_id, stock_applique, mode_paiement, mutuelle_id)
@@ -261,6 +276,8 @@ def update_ordonnance(ordonnance_id: int, data: dict, request: Request, db=Depen
     lignes_resolues = [_resoudre_ligne_ordonnance(cursor, ligne, type_beneficiaire) for ligne in lignes]
     est_validee = data.get("est_validee", 0)
     stock_applique = bool(est_validee)
+    if est_validee:
+        _verifier_montants_avant_validation(lignes_resolues)
 
     if existante["stock_applique"]:
         _restaurer_stock_ordonnance(cursor, ordonnance_id)
