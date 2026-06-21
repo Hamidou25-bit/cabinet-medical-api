@@ -31,7 +31,7 @@ def get_dossier_patient(patient_id: int, db=Depends(get_db), user=Depends(get_cu
     consultations = cursor.fetchall()
 
     cursor.execute("""
-        SELECT o.id, o.date_ordonnance, o.type_beneficiaire, o.est_validee, o.motif
+        SELECT o.id, o.date_ordonnance, o.type_beneficiaire, o.est_validee
         FROM ordonnance o
         WHERE o.patient_id = %s
         ORDER BY o.date_ordonnance DESC, o.id DESC
