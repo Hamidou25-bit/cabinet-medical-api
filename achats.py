@@ -23,6 +23,21 @@ def get_achats(db=Depends(get_db), user=Depends(get_current_user)):
     for achat in achats:
         if achat["fournisseur_id"] is not None and achat["fournisseur_nom"] is None:
             achat["fournisseur_nom"] = "Fournisseur inconnu"
+
+    if achats:
+        ids = [a["id"] for a in achats]
+        cursor.execute("""
+            SELECT achat_id, designation, quantite, prix_unitaire, montant, type_article
+            FROM lignes_achat
+            WHERE achat_id = ANY(%(ids)s)
+            ORDER BY id
+        """, {"ids": ids})
+        lignes_par_achat = {}
+        for ligne in cursor.fetchall():
+            lignes_par_achat.setdefault(ligne["achat_id"], []).append(ligne)
+        for achat in achats:
+            achat["lignes"] = lignes_par_achat.get(achat["id"], [])
+
     return achats
 
 
