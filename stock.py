@@ -8,25 +8,33 @@ from audit_log import log_audit
 router = APIRouter(prefix="/stock", tags=["Stock"])
 
 @router.get("/")
-def get_stock(db=Depends(get_db), user=Depends(require_role("admin"))):
+def get_stock(categorie: str = None, db=Depends(get_db), user=Depends(require_role("admin"))):
     cursor = db.cursor()
-    cursor.execute("""
+    where_clause = ""
+    params = {}
+    if categorie:
+        where_clause = 'WHERE categorie = %(categorie)s'
+        params["categorie"] = categorie
+    cursor.execute(f"""
         SELECT "idStock", "DateEntree", "Type", "Designation", "Fournisseur",
                "Quantite", "SeuilAlerte", "PrixVente", "PrixAchat",
-               "Dosage", "Forme", "DatePeremption"
+               "Dosage", "Forme", "DatePeremption", categorie
         FROM stock
+        {where_clause}
         ORDER BY "Designation"
-    """)
+    """, params)
     return cursor.fetchall()
 
 @router.get("/designations")
 def get_designations(db=Depends(get_db), user=Depends(require_role("admin", "medecin", "secretaire"))):
-    """Liste allégée du stock (sans alertes/fournisseur) pour l'autocomplete des lignes d'ordonnance."""
+    """Liste allégée du stock (sans alertes/fournisseur) pour l'autocomplete des lignes d'ordonnance.
+    Filtrée sur les médicaments uniquement : le matériel médical n'a pas vocation à être prescrit."""
     cursor = db.cursor()
     cursor.execute("""
         SELECT "idStock", "Designation", "Quantite", "PrixVente", "PrixAchat",
                "Dosage", "Forme"
         FROM stock
+        WHERE categorie = 'medicament'
         ORDER BY "Designation"
     """)
     return cursor.fetchall()
@@ -35,7 +43,7 @@ def get_designations(db=Depends(get_db), user=Depends(require_role("admin", "med
 def get_alertes(db=Depends(get_db), user=Depends(require_role("admin"))):
     cursor = db.cursor()
     cursor.execute("""
-        SELECT "idStock", "Designation", "Quantite", "SeuilAlerte"
+        SELECT "idStock", "Designation", "Quantite", "SeuilAlerte", categorie
         FROM stock
         WHERE "Quantite" <= "SeuilAlerte"
         ORDER BY "Quantite"
@@ -62,10 +70,10 @@ def create_article(article: dict, request: Request, db=Depends(get_db), user=Dep
     cursor.execute("""
         INSERT INTO stock ("DateEntree", "Type", "Designation", "Fournisseur",
                           "Quantite", "SeuilAlerte", "PrixVente", "PrixAchat",
-                          "Dosage", "Forme", "DatePeremption")
+                          "Dosage", "Forme", "DatePeremption", categorie)
         VALUES (%(DateEntree)s, %(Type)s, %(Designation)s, %(Fournisseur)s,
                 %(Quantite)s, %(SeuilAlerte)s, %(PrixVente)s, %(PrixAchat)s,
-                %(Dosage)s, %(Forme)s, %(DatePeremption)s)
+                %(Dosage)s, %(Forme)s, %(DatePeremption)s, %(categorie)s)
         RETURNING "idStock"
     """, {
         "DateEntree": article.get("DateEntree"),
@@ -79,6 +87,7 @@ def create_article(article: dict, request: Request, db=Depends(get_db), user=Dep
         "Dosage": article.get("Dosage"),
         "Forme": article.get("Forme"),
         "DatePeremption": article.get("DatePeremption"),
+        "categorie": article.get("categorie", "medicament"),
     })
     db.commit()
     new_id = cursor.fetchone()["idStock"]
@@ -102,7 +111,8 @@ def update_article(stock_id: int, article: dict, request: Request, db=Depends(ge
             "PrixAchat" = %(PrixAchat)s,
             "Dosage" = %(Dosage)s,
             "Forme" = %(Forme)s,
-            "DatePeremption" = %(DatePeremption)s
+            "DatePeremption" = %(DatePeremption)s,
+            categorie = %(categorie)s
         WHERE "idStock" = %(idStock)s
     """, {
         "DateEntree": article.get("DateEntree"),
@@ -116,6 +126,7 @@ def update_article(stock_id: int, article: dict, request: Request, db=Depends(ge
         "Dosage": article.get("Dosage"),
         "Forme": article.get("Forme"),
         "DatePeremption": article.get("DatePeremption"),
+        "categorie": article.get("categorie", "medicament"),
         "idStock": stock_id,
     })
     if cursor.rowcount == 0:
