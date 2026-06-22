@@ -90,10 +90,10 @@ def get_dossier_patient(patient_id: int, db=Depends(get_db), user=Depends(get_cu
         1 for v in vaccinations if v["prochain_rappel"] and v["prochain_rappel"] < date.today()
     )
 
-    total_consultations = sum((c["montant_total"] or 0) for c in consultations)
-    total_ordonnances = sum((o["total"] or 0) for o in ordonnances)
-    total_soins = sum((s["prix_applique"] or 0) for s in soins)
-    total_examens = sum((e["prix"] or 0) for e in examens)
+    total_consultations = sum(float(c["montant_total"] or 0) for c in consultations)
+    total_ordonnances = sum(float(o["total"] or 0) for o in ordonnances)
+    total_soins = sum(float(s["prix_applique"] or 0) for s in soins)
+    total_examens = sum(float(e["prix"] or 0) for e in examens)
 
     dates = (
         [c["date_consult"] for c in consultations]
