@@ -12,7 +12,7 @@ def get_dossier_patient(patient_id: int, db=Depends(get_db), user=Depends(get_cu
 
     cursor.execute("""
         SELECT id, nom, prenom, age, sexe, telephone, adresse,
-               date_enregistrement, profession, ethnie, numero_dossier, email
+               date_enregistrement, profession, ethnie, numero_dossier
         FROM patients
         WHERE id = %s AND (supprime = 0 OR supprime IS NULL)
     """, (patient_id,))

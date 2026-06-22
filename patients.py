@@ -1,3 +1,4 @@
+from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, Request
 from database import get_db
 from auth import get_current_user
@@ -6,12 +7,25 @@ from audit_log import log_audit
 
 router = APIRouter(prefix="/patients", tags=["Patients"])
 
+def _generer_numero_dossier(cursor):
+    """Calcule le prochain numero_dossier au format PAT-AAAA-NNNN (séquence par année,
+    poursuit la numérotation déjà en place plutôt que d'en démarrer une nouvelle)."""
+    annee = datetime.utcnow().year
+    prefixe = f"PAT-{annee}-"
+    cursor.execute(
+        "SELECT numero_dossier FROM patients WHERE numero_dossier LIKE %s ORDER BY numero_dossier DESC LIMIT 1",
+        (prefixe + "%",)
+    )
+    row = cursor.fetchone()
+    dernier_numero = int(row["numero_dossier"][len(prefixe):]) if row else 0
+    return f"{prefixe}{dernier_numero + 1:04d}"
+
 @router.get("/")
 def get_patients(db=Depends(get_db), user=Depends(get_current_user)):
     cursor = db.cursor()
     cursor.execute("""
         SELECT id, nom, prenom, age, sexe, telephone, adresse,
-               date_enregistrement, profession, ethnie, numero_dossier, email
+               date_enregistrement, profession, ethnie, numero_dossier
         FROM patients
         WHERE supprime = 0 OR supprime IS NULL
         ORDER BY nom, prenom
@@ -28,19 +42,20 @@ def get_patient(patient_id: int, db=Depends(get_db), user=Depends(get_current_us
 def create_patient(patient: dict, request: Request, db=Depends(get_db), user=Depends(get_current_user)):
     require_fields(patient, ["nom", "prenom", "age", "sexe"])
     cursor = db.cursor()
+    numero_dossier = _generer_numero_dossier(cursor)
     cursor.execute("""
         INSERT INTO patients (date_enregistrement, nom, prenom, age, sexe,
                              telephone, adresse, profession, ethnie,
-                             numero_dossier, email)
+                             numero_dossier)
         VALUES (%(date_enregistrement)s, %(nom)s, %(prenom)s, %(age)s, %(sexe)s,
                 %(telephone)s, %(adresse)s, %(profession)s, %(ethnie)s,
-                %(numero_dossier)s, %(email)s)
+                %(numero_dossier)s)
         RETURNING id
-    """, patient)
+    """, {**patient, "numero_dossier": numero_dossier})
     db.commit()
     new_id = cursor.fetchone()["id"]
-    log_audit(db, request, user, "CREATE", "patients", new_id, patient)
-    return {"message": "Patient créé", "id": new_id}
+    log_audit(db, request, user, "CREATE", "patients", new_id, {**patient, "numero_dossier": numero_dossier})
+    return {"message": "Patient créé", "id": new_id, "numero_dossier": numero_dossier}
 
 
 @router.put("/{patient_id}")
@@ -56,9 +71,7 @@ def update_patient(patient_id: int, patient: dict, request: Request, db=Depends(
             telephone = %(telephone)s,
             adresse = %(adresse)s,
             profession = %(profession)s,
-            ethnie = %(ethnie)s,
-            numero_dossier = %(numero_dossier)s,
-            email = %(email)s
+            ethnie = %(ethnie)s
         WHERE id = %(id)s
     """, {
         "nom": patient["nom"],
@@ -69,8 +82,6 @@ def update_patient(patient_id: int, patient: dict, request: Request, db=Depends(
         "adresse": patient.get("adresse"),
         "profession": patient.get("profession"),
         "ethnie": patient.get("ethnie"),
-        "numero_dossier": patient.get("numero_dossier"),
-        "email": patient.get("email"),
         "id": patient_id,
     })
     if cursor.rowcount == 0:
