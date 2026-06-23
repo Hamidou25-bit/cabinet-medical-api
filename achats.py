@@ -247,6 +247,22 @@ def _validate_achat(data: dict):
         require_positive(ligne, ["quantite", "prix_unitaire"])
 
 
+def _generer_numero_facture(cursor):
+    """Calcule le prochain numéro de facture séquentiel au format FACT-NNN. Les numéros
+    historiques saisis manuellement (ex: '001', '023', sans le préfixe FACT-) sont conservés
+    tels quels en base mais ignorés pour ce calcul, qui ne porte que sur le format FACT-NNN
+    - la séquence démarre donc à FACT-001."""
+    cursor.execute("""
+        SELECT numero_facture FROM achats
+        WHERE numero_facture ~ '^FACT-[0-9]+$'
+        ORDER BY (substring(numero_facture FROM 6))::int DESC
+        LIMIT 1
+    """)
+    row = cursor.fetchone()
+    dernier_numero = int(row["numero_facture"][5:]) if row else 0
+    return f"FACT-{dernier_numero + 1:03d}"
+
+
 @router.post("/")
 def create_achat(data: dict, request: Request, db=Depends(get_db), user=Depends(require_role("admin"))):
     _validate_achat(data)
@@ -254,6 +270,7 @@ def create_achat(data: dict, request: Request, db=Depends(get_db), user=Depends(
     lignes = data.get("lignes", [])
     montant_total = sum(l.get("quantite", 1) * l.get("prix_unitaire", 0) for l in lignes)
     fournisseur_nom = _get_fournisseur_nom(cursor, data.get("fournisseur_id"))
+    numero_facture = _generer_numero_facture(cursor)
 
     cursor.execute("""
         INSERT INTO achats (fournisseur_id, numero_facture, date_achat, montant_total, statut_paiement, notes, date_creation, statut_facture)
@@ -261,7 +278,7 @@ def create_achat(data: dict, request: Request, db=Depends(get_db), user=Depends(
         RETURNING id
     """, {
         "fournisseur_id": data.get("fournisseur_id"),
-        "numero_facture": data.get("numero_facture"),
+        "numero_facture": numero_facture,
         "date_achat": data["date_achat"],
         "montant_total": montant_total,
         "statut_paiement": data.get("statut_paiement", "Non payé"),
@@ -271,11 +288,11 @@ def create_achat(data: dict, request: Request, db=Depends(get_db), user=Depends(
     achat_id = cursor.fetchone()["id"]
 
     _insert_lignes(cursor, achat_id, lignes, data["date_achat"], fournisseur_nom)
-    _upsert_depense_achat(cursor, achat_id, data["date_achat"], montant_total, fournisseur_nom, data.get("numero_facture"))
+    _upsert_depense_achat(cursor, achat_id, data["date_achat"], montant_total, fournisseur_nom, numero_facture)
 
     db.commit()
     log_audit(db, request, user, "CREATE", "achats", achat_id, data)
-    return {"message": "Achat créé", "id": achat_id}
+    return {"message": "Achat créé", "id": achat_id, "numero_facture": numero_facture}
 
 
 @router.put("/{achat_id}")
@@ -286,14 +303,15 @@ def update_achat(achat_id: int, data: dict, request: Request, db=Depends(get_db)
     montant_total = sum(l.get("quantite", 1) * l.get("prix_unitaire", 0) for l in lignes)
     fournisseur_nom = _get_fournisseur_nom(cursor, data.get("fournisseur_id"))
 
-    cursor.execute('SELECT id FROM achats WHERE id = %s', (achat_id,))
-    if not cursor.fetchone():
+    cursor.execute('SELECT numero_facture FROM achats WHERE id = %s', (achat_id,))
+    existing = cursor.fetchone()
+    if not existing:
         raise HTTPException(status_code=404, detail="Achat non trouvé")
+    numero_facture = existing["numero_facture"]  # jamais modifiable après création
 
     cursor.execute("""
         UPDATE achats
         SET fournisseur_id = %(fournisseur_id)s,
-            numero_facture = %(numero_facture)s,
             date_achat = %(date_achat)s,
             montant_total = %(montant_total)s,
             statut_paiement = %(statut_paiement)s,
@@ -301,7 +319,6 @@ def update_achat(achat_id: int, data: dict, request: Request, db=Depends(get_db)
         WHERE id = %(id)s
     """, {
         "fournisseur_id": data.get("fournisseur_id"),
-        "numero_facture": data.get("numero_facture"),
         "date_achat": data["date_achat"],
         "montant_total": montant_total,
         "statut_paiement": data.get("statut_paiement", "Non payé"),
@@ -312,7 +329,7 @@ def update_achat(achat_id: int, data: dict, request: Request, db=Depends(get_db)
     _retirer_lignes_du_stock(cursor, achat_id)
     cursor.execute("DELETE FROM lignes_achat WHERE achat_id = %s", (achat_id,))
     _insert_lignes(cursor, achat_id, lignes, data["date_achat"], fournisseur_nom)
-    _upsert_depense_achat(cursor, achat_id, data["date_achat"], montant_total, fournisseur_nom, data.get("numero_facture"))
+    _upsert_depense_achat(cursor, achat_id, data["date_achat"], montant_total, fournisseur_nom, numero_facture)
 
     db.commit()
     log_audit(db, request, user, "UPDATE", "achats", achat_id, data)
