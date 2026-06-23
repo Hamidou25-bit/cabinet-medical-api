@@ -28,7 +28,7 @@ def get_patients(db=Depends(get_db), user=Depends(get_current_user)):
                date_enregistrement, profession, ethnie, numero_dossier
         FROM patients
         WHERE supprime = 0 OR supprime IS NULL
-        ORDER BY nom, prenom
+        ORDER BY date_enregistrement DESC, id DESC
     """)
     return cursor.fetchall()
 
