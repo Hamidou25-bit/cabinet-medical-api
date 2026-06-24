@@ -27,32 +27,16 @@ def get_achats(db=Depends(get_db), user=Depends(get_current_user)):
     if achats:
         ids = [a["id"] for a in achats]
         cursor.execute("""
-            SELECT la.achat_id, la.designation, la.quantite, la.prix_unitaire, la.montant, la.type_article,
-                   COALESCE(s.categorie, ts.categorie, 'medicament') AS categorie_ligne
-            FROM lignes_achat la
-            LEFT JOIN stock s ON s."idStock" = la.stock_id
-            LEFT JOIN type_stock ts ON ts.libelle = la.type_article
-            WHERE la.achat_id = ANY(%(ids)s)
-            ORDER BY la.id
+            SELECT achat_id, designation, quantite, prix_unitaire, montant, type_article
+            FROM lignes_achat
+            WHERE achat_id = ANY(%(ids)s)
+            ORDER BY id
         """, {"ids": ids})
         lignes_par_achat = {}
         for ligne in cursor.fetchall():
             lignes_par_achat.setdefault(ligne["achat_id"], []).append(ligne)
         for achat in achats:
-            lignes = lignes_par_achat.get(achat["id"], [])
-            achat["lignes"] = lignes
-            # Volet Médicaments/Matériel médical déterminé par la catégorie majoritaire des lignes
-            # (priorité à la categorie de l'article de stock lié, sinon au type choisi sur la ligne).
-            # En cas d'égalité parfaite entre médicaments et matériel, l'achat est classé "mixte" et
-            # affiché dans les deux volets côté frontend plutôt que d'en masquer une partie du montant.
-            nb_medicament = sum(1 for l in lignes if l["categorie_ligne"] == "medicament")
-            nb_materiel = sum(1 for l in lignes if l["categorie_ligne"] == "materiel")
-            if nb_medicament > nb_materiel:
-                achat["volet"] = "medicament"
-            elif nb_materiel > nb_medicament:
-                achat["volet"] = "materiel"
-            else:
-                achat["volet"] = "mixte"
+            achat["lignes"] = lignes_par_achat.get(achat["id"], [])
 
     return achats
 
@@ -85,17 +69,6 @@ def _get_fournisseur_nom(cursor, fournisseur_id):
     return row["nom"] if row else None
 
 
-def _categorie_pour_type_article(cursor, type_article):
-    """Déduit la categorie stock ('medicament'/'materiel') depuis le libellé de type
-    choisi sur la ligne d'achat, via la table type_stock. Défaut 'medicament' si le
-    type n'est pas renseigné ou ne correspond à aucun type_stock connu."""
-    if not type_article:
-        return "medicament"
-    cursor.execute("SELECT categorie FROM type_stock WHERE libelle = %s", (type_article,))
-    row = cursor.fetchone()
-    return row["categorie"] if row else "medicament"
-
-
 def _creer_article_stock_pour_ligne(cursor, ligne, date_achat, fournisseur_nom):
     """Crée un nouvel article de stock pour une ligne d'achat sans correspondance, et retourne son idStock."""
     quantite = ligne.get("quantite", 1)
@@ -103,10 +76,10 @@ def _creer_article_stock_pour_ligne(cursor, ligne, date_achat, fournisseur_nom):
     cursor.execute("""
         INSERT INTO stock ("DateEntree", "Type", "Designation", "Fournisseur",
                           "Quantite", "SeuilAlerte", "PrixVente", "PrixAchat",
-                          "Dosage", "Forme", "DatePeremption", categorie)
+                          "Dosage", "Forme", "DatePeremption")
         VALUES (%(DateEntree)s, %(Type)s, %(Designation)s, %(Fournisseur)s,
                 %(Quantite)s, %(SeuilAlerte)s, %(PrixVente)s, %(PrixAchat)s,
-                %(Dosage)s, %(Forme)s, %(DatePeremption)s, %(categorie)s)
+                %(Dosage)s, %(Forme)s, %(DatePeremption)s)
         RETURNING "idStock"
     """, {
         "DateEntree": date_achat,
@@ -120,7 +93,6 @@ def _creer_article_stock_pour_ligne(cursor, ligne, date_achat, fournisseur_nom):
         "Dosage": ligne.get("dosage"),
         "Forme": ligne.get("forme"),
         "DatePeremption": ligne.get("date_peremption"),
-        "categorie": _categorie_pour_type_article(cursor, ligne.get("type_article")),
     })
     return cursor.fetchone()["idStock"]
 

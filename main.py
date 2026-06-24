@@ -3,7 +3,6 @@ from fastapi.middleware.cors import CORSMiddleware
 import patients
 import consultations
 import stock
-import type_stock
 import auth
 import ordonnances
 import examens
@@ -39,7 +38,6 @@ app.add_middleware(
 app.include_router(patients.router)
 app.include_router(consultations.router)
 app.include_router(stock.router)
-app.include_router(type_stock.router)
 app.include_router(ordonnances.router)
 app.include_router(examens.router)
 app.include_router(examens_categories.router)
