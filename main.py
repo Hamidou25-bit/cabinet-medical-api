@@ -11,6 +11,7 @@ import examens_types
 import personnel
 import medecins
 import fournisseurs
+import type_article_fournisseur
 import type_depense
 import depenses
 import achats
@@ -20,7 +21,6 @@ import soins
 import utilisateurs
 import dossier
 import dashboard
-import mutuelles
 import vaccinations
 import rendez_vous
 import audit_logs
@@ -45,6 +45,7 @@ app.include_router(examens_types.router)
 app.include_router(personnel.router)
 app.include_router(medecins.router)
 app.include_router(fournisseurs.router)
+app.include_router(type_article_fournisseur.router)
 app.include_router(type_depense.router)
 app.include_router(depenses.router)
 app.include_router(achats.router)
@@ -54,7 +55,6 @@ app.include_router(soins.router)
 app.include_router(utilisateurs.router)
 app.include_router(dossier.router)
 app.include_router(dashboard.router)
-app.include_router(mutuelles.router)
 app.include_router(vaccinations.router)
 app.include_router(rendez_vous.router)
 app.include_router(audit_logs.router)

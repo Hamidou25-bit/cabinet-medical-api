@@ -55,11 +55,13 @@ def get_items(db=Depends(get_db), user=Depends(get_current_user)):
 
 ## Tables PostgreSQL pertinentes
 
-Tables principales : `patients`, `consultations`, `ordonnance`, `ligne_ordonnance`, `rendez_vous`, `stock`, `sortie`, `achats`, `lignes_achat`, `comptabilite`, `depense`, `type_depense`, `personnel`, `utilisateurs`, `examens_complementaires`, `type_examen`, `sous_type_examen`, `medecin`, `dosages`, `formes`, `fournisseur`, `materiel_cabinet`, `soins`, `dossier_patients`, `audit_logs`, `mutuelles` (Phase 11), `vaccinations` (Phase 11)
+Tables principales : `patients`, `consultations`, `ordonnance`, `ligne_ordonnance`, `rendez_vous`, `stock`, `sortie`, `achats`, `lignes_achat`, `comptabilite`, `depense`, `type_depense`, `type_article_fournisseur` (Phase 18), `personnel`, `utilisateurs`, `examens_complementaires`, `type_examen`, `sous_type_examen`, `medecin`, `dosages`, `formes`, `fournisseur`, `materiel_cabinet`, `soins`, `dossier_patients`, `audit_logs`, `vaccinations` (Phase 11)
 
 ⚠️ `type_examen` (catégories d'examens, colonnes `id`/`nom`) et `sous_type_examen` (types d'examens, colonnes `id`/`type_examen_id`/`nom`/`tarif`) existaient déjà avant la Phase 8 — pas de FK déclarée vers `examens_complementaires.sous_type_examen_id`, mais la suppression est protégée au niveau API (409 si référencé).
 
 ⚠️ La table `rendez_vous` (colonnes `id`/`patient_id`/`medecin_id`/`date_heure_rdv` texte ISO/`motif`/`statut`/`notes`/`date_creation`) a été réactivée en Phase 11 via `api/rendez_vous.py`. Statuts normalisés **sans accent** : `en_attente`/`confirme`/`arrive`/`annule`/`reporte` (le défaut colonne `'planifié'` est un résidu pré-Phase 11, ignoré par le nouveau code).
+
+⚠️ Le module Mutuelles (Phase 11) a été retiré en Phase 18 : `api/mutuelles.py` supprimé, plus de router dans `main.py`, plus d'option "Mutuelle" dans les formulaires Consultations/Ordonnances. La table `mutuelles` et les colonnes `mutuelle_id` (`consultations`/`ordonnance`) sont **conservées en base, non droppées** (même pattern que `rendez_vous` en Phase 7) pour préserver l'historique déjà saisi.
 
 ## État des modules API
 
@@ -69,12 +71,11 @@ Tables principales : `patients`, `consultations`, `ordonnance`, `ligne_ordonnanc
 | Dashboard (`/dashboard/rdv-aujourdhui`, `/dashboard/statistiques`) | ✅ |
 | Patients (liste + création) | ✅ |
 | Dossier patient (`GET /patients/{id}/dossier`, agrège consultations/ordonnances/soins/examens/vaccinations) | ✅ |
-| Consultations (liste, champ `traitement_apres_diagnostic` supprimé, `mode_paiement`/`mutuelle_id`) | ✅ |
+| Consultations (liste, champ `traitement_apres_diagnostic` supprimé, `mode_paiement`) | ✅ |
 | Stock (liste + alertes, `POST /stock/sortie`, `GET /stock/sorties` supprimé) | ✅ |
-| Ordonnances (liste filtrable par type_beneficiaire/date + création + export Excel détaillé + validation déclenchant les mouvements de stock via `stock_applique`, montant calculé sur `PrixAchat` pour `type_beneficiaire='interne'`, `mode_paiement`/`mutuelle_id`) | ✅ |
+| Ordonnances (liste filtrable par type_beneficiaire/date + création + export Excel détaillé + validation déclenchant les mouvements de stock via `stock_applique`, montant calculé sur `PrixAchat` pour `type_beneficiaire='interne'`, `mode_paiement`) | ✅ |
 | Rendez-vous (réactivé Phase 11, `api/rendez_vous.py`, CRUD + `PATCH /rendez-vous/{id}/statut`) | ✅ |
 | Examens complémentaires (`examens-complementaires` CRUD + `examens-categories` + `examens-types` avec `tarif`) | ✅ |
-| Mutuelles (`api/mutuelles.py`, CRUD admin) | ✅ |
 | Vaccinations (`api/vaccinations.py`, CRUD) | ✅ |
 | Personnel | ❌ à faire |
 | Comptabilité | 🟡 en cours (`type_depense` CRUD admin, `depenses` lecture, `GET /comptabilite/synthese` recettes/dépenses/profit + `recettes_par_mode_paiement`, recettes ordonnances limitées aux ordonnances validées de type `patient`/`tiers`) |
