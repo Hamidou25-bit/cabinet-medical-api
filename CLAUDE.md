@@ -55,7 +55,9 @@ def get_items(db=Depends(get_db), user=Depends(get_current_user)):
 
 ## Tables PostgreSQL pertinentes
 
-Tables principales : `patients`, `consultations`, `ordonnance`, `ligne_ordonnance`, `rendez_vous`, `stock`, `sortie`, `achats`, `lignes_achat`, `comptabilite`, `depense`, `type_depense`, `type_article_fournisseur` (Phase 18), `personnel`, `utilisateurs`, `examens_complementaires`, `type_examen`, `sous_type_examen`, `medecin`, `dosages`, `formes`, `fournisseur`, `materiel_cabinet`, `soins`, `dossier_patients`, `audit_logs`, `vaccinations` (Phase 11)
+Tables principales : `patients`, `consultations`, `ordonnance`, `ligne_ordonnance`, `rendez_vous`, `stock`, `sortie`, `achats`, `lignes_achat`, `comptabilite` (legacy, jamais lue par le code), `depense`, `type_depense`, `type_article_fournisseur` (Phase 18), `personnel`, `utilisateurs`, `examens_complementaires`, `type_examen`, `sous_type_examen`, `medecin`, `dosages`, `formes`, `fournisseur`, `materiel_cabinet`, `soins`, `dossier_patients`, `audit_logs`, `vaccinations` (Phase 11), `parametres_cabinet` (Phase 20)
+
+⚠️ Colonne `paye` (BOOLEAN, Phase 20) ajoutée sur `consultations`/`soins`/`examens_complementaires`/`ordonnance` — chaque module a une route `POST .../{id}/encaisser` (admin/secretaire) qui la passe à `true`. `GET /comptabilite/synthese` filtre désormais sur `paye = true` : les recettes reflètent l'encaissement réel, pas la simple création de l'enregistrement. Les enregistrements antérieurs à cette migration ont été backfillés à `paye = true`.
 
 ⚠️ `type_examen` (catégories d'examens, colonnes `id`/`nom`) et `sous_type_examen` (types d'examens, colonnes `id`/`type_examen_id`/`nom`/`tarif`) existaient déjà avant la Phase 8 — pas de FK déclarée vers `examens_complementaires.sous_type_examen_id`, mais la suppression est protégée au niveau API (409 si référencé).
 
@@ -78,10 +80,12 @@ Tables principales : `patients`, `consultations`, `ordonnance`, `ligne_ordonnanc
 | Examens complémentaires (`examens-complementaires` CRUD + `examens-categories` + `examens-types` avec `tarif`) | ✅ |
 | Vaccinations (`api/vaccinations.py`, CRUD) | ✅ |
 | Personnel | ❌ à faire |
-| Comptabilité | 🟡 en cours (`type_depense` CRUD admin, `depenses` lecture, `GET /comptabilite/synthese` recettes/dépenses/profit + `recettes_par_mode_paiement`, recettes ordonnances limitées aux ordonnances validées de type `patient`/`tiers`) |
+| Comptabilité | 🟡 en cours (`type_depense` CRUD admin, `depenses` lecture, `GET /comptabilite/synthese` recettes/dépenses/profit + `recettes_par_mode_paiement`, recettes limitées aux enregistrements `paye = true` depuis la Phase 20) |
 | Rapports | ❌ à faire |
 | CRUD Patients (modifier/supprimer) | ❌ à faire (colonne `supprime`) |
 | CRUD Stock (entrées/sorties) | 🟡 sortie via `POST /stock/sortie` (entrées via achats) |
+| Paramètres cabinet (Phase 20) | ✅ `api/parametres.py` |
+| Caisse/encaissement (Phase 20) | ✅ `POST /consultations|soins|examens-complementaires|ordonnances/{id}/encaisser` |
 
 ## Déploiement
 
