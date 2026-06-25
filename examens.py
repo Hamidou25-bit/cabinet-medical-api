@@ -21,7 +21,7 @@ def get_examens(statut: str = None, db=Depends(get_db), user=Depends(get_current
             where_clause = "WHERE e.statut = ANY(%(statuts)s)"
             params["statuts"] = valeurs
     cursor.execute(f"""
-        SELECT e.id, e.date_examen, e.resultat, e.prix, e.patient_id,
+        SELECT e.id, e.date_examen, e.resultat, e.prix, e.paye, e.patient_id,
                e.nom_patient_externe,
                e.sous_type_examen_id, e.medecin_id, e.date_creation,
                e.renseignement_clinique,
@@ -176,3 +176,18 @@ def update_resultat_examen(examen_id: int, data: dict, request: Request, db=Depe
     db.commit()
     log_audit(db, request, user, "UPDATE_RESULTAT", "examens_complementaires", examen_id, None)
     return {"message": "Résultat enregistré"}
+
+
+@router.post("/{examen_id}/encaisser")
+def encaisser_examen(examen_id: int, request: Request, db=Depends(get_db), user=Depends(require_role("admin", "secretaire"))):
+    cursor = db.cursor()
+    cursor.execute("SELECT id, prix, paye FROM examens_complementaires WHERE id = %s", (examen_id,))
+    examen = cursor.fetchone()
+    if not examen:
+        raise HTTPException(status_code=404, detail="Examen non trouvé")
+    if examen["paye"]:
+        raise HTTPException(status_code=400, detail="Examen déjà encaissé")
+    cursor.execute("UPDATE examens_complementaires SET paye = true WHERE id = %s", (examen_id,))
+    db.commit()
+    log_audit(db, request, user, "ENCAISSER", "examens_complementaires", examen_id, None)
+    return {"message": "Examen encaissé", "montant": examen["prix"]}

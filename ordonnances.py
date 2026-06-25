@@ -124,7 +124,7 @@ def get_ordonnances(type_beneficiaire: str = None, date_debut: str = None, date_
     where_clause, params = _construire_filtres_ordonnances(type_beneficiaire, date_debut, date_fin)
     cursor.execute(f"""
         SELECT o.id, o.date_ordonnance, o.est_validee, o.type_beneficiaire,
-               o.beneficiaire, o.patient_id, o.medecin_id, o.mode_paiement, o.mutuelle_id,
+               o.beneficiaire, o.patient_id, o.medecin_id, o.mode_paiement, o.mutuelle_id, o.paye,
                p.nom, p.prenom, m.nom AS medecin_nom, mu.nom AS mutuelle_nom,
                COALESCE(SUM(lo.montant), 0) AS montant_total
         FROM ordonnance o
@@ -134,7 +134,7 @@ def get_ordonnances(type_beneficiaire: str = None, date_debut: str = None, date_
         LEFT JOIN ligne_ordonnance lo ON lo.ordonnance_id = o.id
         {where_clause}
         GROUP BY o.id, o.date_ordonnance, o.est_validee, o.type_beneficiaire,
-                 o.beneficiaire, o.patient_id, o.medecin_id, o.mode_paiement, o.mutuelle_id,
+                 o.beneficiaire, o.patient_id, o.medecin_id, o.mode_paiement, o.mutuelle_id, o.paye,
                  p.nom, p.prenom, m.nom, mu.nom
         ORDER BY o.date_ordonnance DESC, o.id DESC
     """, params)
@@ -388,3 +388,35 @@ def delete_ordonnance(ordonnance_id: int, request: Request, db=Depends(get_db), 
     db.commit()
     log_audit(db, request, user, "DELETE", "ordonnance", ordonnance_id, None)
     return {"message": "Ordonnance supprimée"}
+
+
+@router.post("/{ordonnance_id}/encaisser")
+def encaisser_ordonnance(ordonnance_id: int, request: Request, db=Depends(get_db), user=Depends(require_role("admin", "secretaire"))):
+    """Encaisse une ordonnance validée (patient/tiers) : ne facture que les lignes dont
+    le médicament provient du stock du cabinet (stock_id renseigné) — un médicament acheté
+    par le patient en dehors du cabinet n'a rien à encaisser ici."""
+    cursor = db.cursor()
+    cursor.execute("SELECT id, type_beneficiaire, est_validee, paye FROM ordonnance WHERE id = %s", (ordonnance_id,))
+    ordonnance = cursor.fetchone()
+    if not ordonnance:
+        raise HTTPException(status_code=404, detail="Ordonnance non trouvée")
+    if ordonnance["type_beneficiaire"] not in ("patient", "tiers"):
+        raise HTTPException(status_code=400, detail="Seules les ordonnances patient/tiers peuvent être encaissées")
+    if not ordonnance["est_validee"]:
+        raise HTTPException(status_code=400, detail="L'ordonnance doit être validée avant d'être encaissée")
+    if ordonnance["paye"]:
+        raise HTTPException(status_code=400, detail="Ordonnance déjà encaissée")
+
+    cursor.execute("""
+        SELECT COALESCE(SUM(montant), 0) AS total
+        FROM ligne_ordonnance
+        WHERE ordonnance_id = %s AND stock_id IS NOT NULL
+    """, (ordonnance_id,))
+    montant = float(cursor.fetchone()["total"])
+    if montant <= 0:
+        return {"message": "Aucun médicament en stock cabinet à facturer", "montant": 0, "encaisse": False}
+
+    cursor.execute("UPDATE ordonnance SET paye = true WHERE id = %s", (ordonnance_id,))
+    db.commit()
+    log_audit(db, request, user, "ENCAISSER", "ordonnance", ordonnance_id, None)
+    return {"message": "Ordonnance encaissée", "montant": montant, "encaisse": True}

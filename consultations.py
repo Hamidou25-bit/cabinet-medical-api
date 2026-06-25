@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, Request
 from database import get_db
-from auth import get_current_user
+from auth import get_current_user, require_role
 from validation import require_fields
 from audit_log import log_audit
 
@@ -11,7 +11,7 @@ def get_consultations(db=Depends(get_db), user=Depends(get_current_user)):
     cursor = db.cursor()
     cursor.execute("""
         SELECT c.id, c.date_consult, c.prix_unitaire, c.montant_total,
-               c.motif, c.diagnostic, c.observation,
+               c.motif, c.diagnostic, c.observation, c.paye,
                c.patient_id, c.medecin_id, c.mode_paiement, c.mutuelle_id,
                p.nom, p.prenom,
                m.nom AS medecin_nom,
@@ -116,3 +116,18 @@ def delete_consultation(consultation_id: int, request: Request, db=Depends(get_d
     db.commit()
     log_audit(db, request, user, "DELETE", "consultations", consultation_id, None)
     return {"message": "Consultation supprimée"}
+
+
+@router.post("/{consultation_id}/encaisser")
+def encaisser_consultation(consultation_id: int, request: Request, db=Depends(get_db), user=Depends(require_role("admin", "secretaire"))):
+    cursor = db.cursor()
+    cursor.execute("SELECT id, montant_total, paye FROM consultations WHERE id = %s", (consultation_id,))
+    consultation = cursor.fetchone()
+    if not consultation:
+        raise HTTPException(status_code=404, detail="Consultation non trouvée")
+    if consultation["paye"]:
+        raise HTTPException(status_code=400, detail="Consultation déjà encaissée")
+    cursor.execute("UPDATE consultations SET paye = true WHERE id = %s", (consultation_id,))
+    db.commit()
+    log_audit(db, request, user, "ENCAISSER", "consultations", consultation_id, None)
+    return {"message": "Consultation encaissée", "montant": consultation["montant_total"]}

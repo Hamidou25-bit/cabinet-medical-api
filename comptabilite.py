@@ -22,6 +22,7 @@ def get_synthese(date_debut: str = None, date_fin: str = None, db=Depends(get_db
         SELECT COALESCE(SUM(montant_total), 0) AS total
         FROM consultations
         WHERE date_consult BETWEEN %(debut)s AND %(fin)s
+          AND paye = true
     """, params)
     recettes_consultations = float(cursor.fetchone()["total"])
 
@@ -31,6 +32,7 @@ def get_synthese(date_debut: str = None, date_fin: str = None, db=Depends(get_db
         JOIN ordonnance o ON o.id = lo.ordonnance_id
         WHERE o.type_beneficiaire IN ('patient', 'tiers')
           AND o.est_validee = 1
+          AND o.paye = true
           AND o.date_ordonnance BETWEEN %(debut)s AND %(fin)s
     """, params)
     recettes_ordonnances = float(cursor.fetchone()["total"])
@@ -39,6 +41,7 @@ def get_synthese(date_debut: str = None, date_fin: str = None, db=Depends(get_db
         SELECT COALESCE(SUM(prix_applique), 0) AS total
         FROM soins
         WHERE date_soin BETWEEN %(debut)s AND %(fin)s
+          AND paye = true
     """, params)
     recettes_soins = float(cursor.fetchone()["total"])
 
@@ -46,6 +49,7 @@ def get_synthese(date_debut: str = None, date_fin: str = None, db=Depends(get_db
         SELECT COALESCE(SUM(prix), 0) AS total
         FROM examens_complementaires
         WHERE date_examen BETWEEN %(debut)s AND %(fin)s
+          AND paye = true
     """, params)
     recettes_examens = float(cursor.fetchone()["total"])
 
@@ -73,22 +77,23 @@ def get_synthese(date_debut: str = None, date_fin: str = None, db=Depends(get_db
         FROM (
             SELECT SUBSTRING(date_consult, 1, 7) AS mois, montant_total AS montant
             FROM consultations
-            WHERE date_consult BETWEEN %(debut)s AND %(fin)s
+            WHERE date_consult BETWEEN %(debut)s AND %(fin)s AND paye = true
             UNION ALL
             SELECT SUBSTRING(o.date_ordonnance::text, 1, 7), lo.montant
             FROM ligne_ordonnance lo
             JOIN ordonnance o ON o.id = lo.ordonnance_id
             WHERE o.type_beneficiaire IN ('patient', 'tiers')
               AND o.est_validee = 1
+              AND o.paye = true
               AND o.date_ordonnance BETWEEN %(debut)s AND %(fin)s
             UNION ALL
             SELECT SUBSTRING(date_soin::text, 1, 7), prix_applique
             FROM soins
-            WHERE date_soin BETWEEN %(debut)s AND %(fin)s
+            WHERE date_soin BETWEEN %(debut)s AND %(fin)s AND paye = true
             UNION ALL
             SELECT SUBSTRING(date_examen, 1, 7), prix
             FROM examens_complementaires
-            WHERE date_examen BETWEEN %(debut)s AND %(fin)s
+            WHERE date_examen BETWEEN %(debut)s AND %(fin)s AND paye = true
         ) recettes_par_mois
         GROUP BY mois
     """, params)
@@ -107,13 +112,14 @@ def get_synthese(date_debut: str = None, date_fin: str = None, db=Depends(get_db
         FROM (
             SELECT mode_paiement AS mode, montant_total AS montant
             FROM consultations
-            WHERE date_consult BETWEEN %(debut)s AND %(fin)s
+            WHERE date_consult BETWEEN %(debut)s AND %(fin)s AND paye = true
             UNION ALL
             SELECT o.mode_paiement, lo.montant
             FROM ligne_ordonnance lo
             JOIN ordonnance o ON o.id = lo.ordonnance_id
             WHERE o.type_beneficiaire IN ('patient', 'tiers')
               AND o.est_validee = 1
+              AND o.paye = true
               AND o.date_ordonnance BETWEEN %(debut)s AND %(fin)s
         ) recettes_par_mode
         GROUP BY mode

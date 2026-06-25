@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, Request
 from database import get_db
-from auth import get_current_user
+from auth import get_current_user, require_role
 from validation import require_fields
 from audit_log import log_audit
 
@@ -58,7 +58,7 @@ def get_soins(
     where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
 
     cursor.execute(f"""
-        SELECT s.id, s.date_soin, s.prix_applique, s.notes,
+        SELECT s.id, s.date_soin, s.prix_applique, s.notes, s.paye,
                s.patient_id, s.nom_patient_externe, s.ordonnance_id,
                p.nom AS patient_nom, p.prenom AS patient_prenom,
                ts.id AS type_soin_id, ts.nom AS type_soin_nom, ts.prix_defaut
@@ -146,3 +146,18 @@ def delete_soin(soin_id: int, request: Request, db=Depends(get_db), user=Depends
     db.commit()
     log_audit(db, request, user, "DELETE", "soins", soin_id, None)
     return {"message": "Soin supprimé"}
+
+
+@router.post("/{soin_id}/encaisser")
+def encaisser_soin(soin_id: int, request: Request, db=Depends(get_db), user=Depends(require_role("admin", "secretaire"))):
+    cursor = db.cursor()
+    cursor.execute("SELECT id, prix_applique, paye FROM soins WHERE id = %s", (soin_id,))
+    soin = cursor.fetchone()
+    if not soin:
+        raise HTTPException(status_code=404, detail="Soin non trouvé")
+    if soin["paye"]:
+        raise HTTPException(status_code=400, detail="Soin déjà encaissé")
+    cursor.execute("UPDATE soins SET paye = true WHERE id = %s", (soin_id,))
+    db.commit()
+    log_audit(db, request, user, "ENCAISSER", "soins", soin_id, None)
+    return {"message": "Soin encaissé", "montant": float(soin["prix_applique"])}
