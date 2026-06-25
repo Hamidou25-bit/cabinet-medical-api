@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, Request
 from database import get_db
-from auth import get_current_user
+from auth import get_current_user, require_role
 from validation import require_fields
 from audit_log import log_audit
 from soins import inserer_soin
@@ -143,7 +143,7 @@ def get_ordonnances(type_beneficiaire: str = None, date_debut: str = None, date_
 
 @router.get("/export")
 def export_ordonnances(type_beneficiaire: str = None, date_debut: str = None, date_fin: str = None,
-                        db=Depends(get_db), user=Depends(get_current_user)):
+                        db=Depends(get_db), user=Depends(require_role("admin"))):
     """Retourne les ordonnances (avec leurs lignes) correspondant aux filtres,
     pour permettre la génération d'un export Excel détaillé côté frontend."""
     cursor = db.cursor()
