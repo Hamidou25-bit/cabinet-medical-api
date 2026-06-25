@@ -181,7 +181,14 @@ def update_resultat_examen(examen_id: int, data: dict, request: Request, db=Depe
 @router.post("/{examen_id}/encaisser")
 def encaisser_examen(examen_id: int, request: Request, db=Depends(get_db), user=Depends(require_role("admin", "secretaire"))):
     cursor = db.cursor()
-    cursor.execute("SELECT id, prix, paye FROM examens_complementaires WHERE id = %s", (examen_id,))
+    cursor.execute("""
+        SELECT e.id, e.prix, e.paye, e.nom_patient_externe,
+               p.nom, p.prenom, ste.nom AS examen_nom
+        FROM examens_complementaires e
+        LEFT JOIN patients p ON e.patient_id = p.id
+        LEFT JOIN sous_type_examen ste ON e.sous_type_examen_id = ste.id
+        WHERE e.id = %s
+    """, (examen_id,))
     examen = cursor.fetchone()
     if not examen:
         raise HTTPException(status_code=404, detail="Examen non trouvé")
@@ -190,4 +197,9 @@ def encaisser_examen(examen_id: int, request: Request, db=Depends(get_db), user=
     cursor.execute("UPDATE examens_complementaires SET paye = true WHERE id = %s", (examen_id,))
     db.commit()
     log_audit(db, request, user, "ENCAISSER", "examens_complementaires", examen_id, None)
-    return {"message": "Examen encaissé", "montant": examen["prix"]}
+    patient_nom = f"{examen['nom'] or ''} {examen['prenom'] or ''}".strip() or examen["nom_patient_externe"] or "-"
+    return {
+        "message": "Examen encaissé",
+        "montant": examen["prix"],
+        "examen": {"id": examen["id"], "patient_nom": patient_nom, "libelle": examen["examen_nom"] or "Examen"},
+    }

@@ -396,7 +396,12 @@ def encaisser_ordonnance(ordonnance_id: int, request: Request, db=Depends(get_db
     le médicament provient du stock du cabinet (stock_id renseigné) — un médicament acheté
     par le patient en dehors du cabinet n'a rien à encaisser ici."""
     cursor = db.cursor()
-    cursor.execute("SELECT id, type_beneficiaire, est_validee, paye FROM ordonnance WHERE id = %s", (ordonnance_id,))
+    cursor.execute("""
+        SELECT o.id, o.type_beneficiaire, o.est_validee, o.paye, o.beneficiaire, p.nom, p.prenom
+        FROM ordonnance o
+        LEFT JOIN patients p ON o.patient_id = p.id
+        WHERE o.id = %s
+    """, (ordonnance_id,))
     ordonnance = cursor.fetchone()
     if not ordonnance:
         raise HTTPException(status_code=404, detail="Ordonnance non trouvée")
@@ -408,15 +413,24 @@ def encaisser_ordonnance(ordonnance_id: int, request: Request, db=Depends(get_db
         raise HTTPException(status_code=400, detail="Ordonnance déjà encaissée")
 
     cursor.execute("""
-        SELECT COALESCE(SUM(montant), 0) AS total
+        SELECT designation, montant
         FROM ligne_ordonnance
         WHERE ordonnance_id = %s AND stock_id IS NOT NULL
+        ORDER BY id
     """, (ordonnance_id,))
-    montant = float(cursor.fetchone()["total"])
+    lignes_facturees = cursor.fetchall()
+    montant = float(sum((l["montant"] or 0) for l in lignes_facturees))
     if montant <= 0:
         return {"message": "Aucun médicament en stock cabinet à facturer", "montant": 0, "encaisse": False}
 
     cursor.execute("UPDATE ordonnance SET paye = true WHERE id = %s", (ordonnance_id,))
     db.commit()
     log_audit(db, request, user, "ENCAISSER", "ordonnance", ordonnance_id, None)
-    return {"message": "Ordonnance encaissée", "montant": montant, "encaisse": True}
+    patient_nom = f"{ordonnance['nom'] or ''} {ordonnance['prenom'] or ''}".strip() or ordonnance["beneficiaire"] or "-"
+    return {
+        "message": "Ordonnance encaissée",
+        "montant": montant,
+        "encaisse": True,
+        "ordonnance": {"id": ordonnance["id"], "patient_nom": patient_nom},
+        "lignes": [{"libelle": l["designation"], "montant": float(l["montant"] or 0)} for l in lignes_facturees],
+    }

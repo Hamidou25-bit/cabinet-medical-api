@@ -121,7 +121,12 @@ def delete_consultation(consultation_id: int, request: Request, db=Depends(get_d
 @router.post("/{consultation_id}/encaisser")
 def encaisser_consultation(consultation_id: int, request: Request, db=Depends(get_db), user=Depends(require_role("admin", "secretaire"))):
     cursor = db.cursor()
-    cursor.execute("SELECT id, montant_total, paye FROM consultations WHERE id = %s", (consultation_id,))
+    cursor.execute("""
+        SELECT c.id, c.montant_total, c.paye, p.nom, p.prenom
+        FROM consultations c
+        LEFT JOIN patients p ON c.patient_id = p.id
+        WHERE c.id = %s
+    """, (consultation_id,))
     consultation = cursor.fetchone()
     if not consultation:
         raise HTTPException(status_code=404, detail="Consultation non trouvée")
@@ -130,4 +135,9 @@ def encaisser_consultation(consultation_id: int, request: Request, db=Depends(ge
     cursor.execute("UPDATE consultations SET paye = true WHERE id = %s", (consultation_id,))
     db.commit()
     log_audit(db, request, user, "ENCAISSER", "consultations", consultation_id, None)
-    return {"message": "Consultation encaissée", "montant": consultation["montant_total"]}
+    patient_nom = f"{consultation['nom'] or ''} {consultation['prenom'] or ''}".strip() or "-"
+    return {
+        "message": "Consultation encaissée",
+        "montant": consultation["montant_total"],
+        "consultation": {"id": consultation["id"], "patient_nom": patient_nom},
+    }

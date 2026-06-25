@@ -151,7 +151,14 @@ def delete_soin(soin_id: int, request: Request, db=Depends(get_db), user=Depends
 @router.post("/{soin_id}/encaisser")
 def encaisser_soin(soin_id: int, request: Request, db=Depends(get_db), user=Depends(require_role("admin", "secretaire"))):
     cursor = db.cursor()
-    cursor.execute("SELECT id, prix_applique, paye FROM soins WHERE id = %s", (soin_id,))
+    cursor.execute("""
+        SELECT s.id, s.prix_applique, s.paye, s.nom_patient_externe,
+               p.nom, p.prenom, ts.nom AS type_soin_nom
+        FROM soins s
+        LEFT JOIN patients p ON s.patient_id = p.id
+        LEFT JOIN type_soin ts ON s.type_soin_id = ts.id
+        WHERE s.id = %s
+    """, (soin_id,))
     soin = cursor.fetchone()
     if not soin:
         raise HTTPException(status_code=404, detail="Soin non trouvé")
@@ -160,4 +167,9 @@ def encaisser_soin(soin_id: int, request: Request, db=Depends(get_db), user=Depe
     cursor.execute("UPDATE soins SET paye = true WHERE id = %s", (soin_id,))
     db.commit()
     log_audit(db, request, user, "ENCAISSER", "soins", soin_id, None)
-    return {"message": "Soin encaissé", "montant": float(soin["prix_applique"])}
+    patient_nom = f"{soin['nom'] or ''} {soin['prenom'] or ''}".strip() or soin["nom_patient_externe"] or "-"
+    return {
+        "message": "Soin encaissé",
+        "montant": float(soin["prix_applique"]),
+        "soin": {"id": soin["id"], "patient_nom": patient_nom, "libelle": soin["type_soin_nom"] or "Soin"},
+    }
