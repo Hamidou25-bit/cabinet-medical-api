@@ -61,7 +61,7 @@ def get_examen(examen_id: int, db=Depends(get_db), user=Depends(get_current_user
 
 
 @router.post("/")
-def create_examen(data: dict, request: Request, db=Depends(get_db), user=Depends(require_role("admin", "medecin", "secretaire"))):
+def create_examen(data: dict, request: Request, db=Depends(get_db), user=Depends(require_role("admin", "medecin", "secretaire", "laborantin"))):
     require_fields(data, ["sous_type_examen_id", "date_examen"])
     patient_id = data.get("patient_id")
     nom_patient_externe = data.get("nom_patient_externe")
