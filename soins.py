@@ -3,6 +3,7 @@ from database import get_db
 from auth import get_current_user, require_role
 from validation import require_fields
 from audit_log import log_audit
+from repartition import calculer_et_enregistrer_repartition
 
 router = APIRouter(prefix="/soins", tags=["Soins"])
 
@@ -152,7 +153,7 @@ def delete_soin(soin_id: int, request: Request, db=Depends(get_db), user=Depends
 def encaisser_soin(soin_id: int, request: Request, db=Depends(get_db), user=Depends(require_role("admin", "secretaire"))):
     cursor = db.cursor()
     cursor.execute("""
-        SELECT s.id, s.prix_applique, s.paye, s.nom_patient_externe,
+        SELECT s.id, s.prix_applique, s.paye, s.nom_patient_externe, s.date_soin,
                p.nom, p.prenom, ts.nom AS type_soin_nom
         FROM soins s
         LEFT JOIN patients p ON s.patient_id = p.id
@@ -165,6 +166,7 @@ def encaisser_soin(soin_id: int, request: Request, db=Depends(get_db), user=Depe
     if soin["paye"]:
         raise HTTPException(status_code=400, detail="Soin déjà encaissé")
     cursor.execute("UPDATE soins SET paye = true WHERE id = %s", (soin_id,))
+    calculer_et_enregistrer_repartition(db, "soin", soin_id, float(soin["prix_applique"]), soin["date_soin"])
     db.commit()
     log_audit(db, request, user, "ENCAISSER", "soins", soin_id, None)
     patient_nom = f"{soin['nom'] or ''} {soin['prenom'] or ''}".strip() or soin["nom_patient_externe"] or "-"

@@ -3,6 +3,7 @@ from database import get_db
 from auth import get_current_user, require_role
 from validation import require_fields
 from audit_log import log_audit
+from repartition import calculer_et_enregistrer_repartition
 
 router = APIRouter(prefix="/consultations", tags=["Consultations"])
 
@@ -122,7 +123,7 @@ def delete_consultation(consultation_id: int, request: Request, db=Depends(get_d
 def encaisser_consultation(consultation_id: int, request: Request, db=Depends(get_db), user=Depends(require_role("admin", "secretaire"))):
     cursor = db.cursor()
     cursor.execute("""
-        SELECT c.id, c.montant_total, c.paye, p.nom, p.prenom
+        SELECT c.id, c.montant_total, c.paye, c.medecin_id, c.date_consult, p.nom, p.prenom
         FROM consultations c
         LEFT JOIN patients p ON c.patient_id = p.id
         WHERE c.id = %s
@@ -133,6 +134,10 @@ def encaisser_consultation(consultation_id: int, request: Request, db=Depends(ge
     if consultation["paye"]:
         raise HTTPException(status_code=400, detail="Consultation déjà encaissée")
     cursor.execute("UPDATE consultations SET paye = true WHERE id = %s", (consultation_id,))
+    calculer_et_enregistrer_repartition(
+        db, "consultation", consultation_id, float(consultation["montant_total"]),
+        consultation["date_consult"], medecin_id=consultation["medecin_id"],
+    )
     db.commit()
     log_audit(db, request, user, "ENCAISSER", "consultations", consultation_id, None)
     patient_nom = f"{consultation['nom'] or ''} {consultation['prenom'] or ''}".strip() or "-"

@@ -4,6 +4,7 @@ from database import get_db
 from auth import get_current_user, require_role
 from validation import require_fields
 from audit_log import log_audit
+from repartition import calculer_et_enregistrer_repartition
 
 router = APIRouter(prefix="/examens-complementaires", tags=["Examens complémentaires"])
 
@@ -182,7 +183,7 @@ def update_resultat_examen(examen_id: int, data: dict, request: Request, db=Depe
 def encaisser_examen(examen_id: int, request: Request, db=Depends(get_db), user=Depends(require_role("admin", "secretaire"))):
     cursor = db.cursor()
     cursor.execute("""
-        SELECT e.id, e.prix, e.paye, e.nom_patient_externe,
+        SELECT e.id, e.prix, e.paye, e.nom_patient_externe, e.medecin_id, e.fait_par_id, e.date_examen,
                p.nom, p.prenom, ste.nom AS examen_nom
         FROM examens_complementaires e
         LEFT JOIN patients p ON e.patient_id = p.id
@@ -195,6 +196,10 @@ def encaisser_examen(examen_id: int, request: Request, db=Depends(get_db), user=
     if examen["paye"]:
         raise HTTPException(status_code=400, detail="Examen déjà encaissé")
     cursor.execute("UPDATE examens_complementaires SET paye = true WHERE id = %s", (examen_id,))
+    calculer_et_enregistrer_repartition(
+        db, "examen", examen_id, float(examen["prix"]), examen["date_examen"],
+        medecin_id=examen["medecin_id"], laborantin_id=examen["fait_par_id"],
+    )
     db.commit()
     log_audit(db, request, user, "ENCAISSER", "examens_complementaires", examen_id, None)
     patient_nom = f"{examen['nom'] or ''} {examen['prenom'] or ''}".strip() or examen["nom_patient_externe"] or "-"

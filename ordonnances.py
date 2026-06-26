@@ -4,6 +4,7 @@ from auth import get_current_user, require_role
 from validation import require_fields
 from audit_log import log_audit
 from soins import inserer_soin
+from repartition import calculer_et_enregistrer_repartition
 
 router = APIRouter(prefix="/ordonnances", tags=["Ordonnances"])
 
@@ -196,6 +197,52 @@ def get_medecins(db=Depends(get_db), user=Depends(get_current_user)):
     cursor = db.cursor()
     cursor.execute("SELECT id, nom FROM medecin ORDER BY nom")
     return cursor.fetchall()
+
+
+@router.get("/marges")
+def get_marges_ordonnances(date_debut: str = None, date_fin: str = None, db=Depends(get_db), user=Depends(require_role("admin"))):
+    """Marge cabinet sur les médicaments du stock vendus via ordonnance, basée sur le
+    prix d'achat/montant figés sur chaque ligne au moment de la vente (et non sur le
+    prix actuel du stock, qui peut avoir changé depuis - cf. bug recettes Phase 14)."""
+    cursor = db.cursor()
+    cursor.execute("""
+        SELECT lo.designation,
+               SUM(lo.quantite) AS quantite_vendue,
+               SUM(lo.quantite * lo.prix_achat) AS cout_total,
+               SUM(lo.montant) AS recette_totale,
+               SUM(lo.montant) - SUM(lo.quantite * lo.prix_achat) AS marge_totale
+        FROM ligne_ordonnance lo
+        JOIN ordonnance o ON o.id = lo.ordonnance_id
+        WHERE lo.stock_id IS NOT NULL
+        AND o.paye = TRUE
+        AND o.type_beneficiaire IN ('patient', 'tiers')
+        AND (%(date_debut)s IS NULL OR o.date_ordonnance >= %(date_debut)s)
+        AND (%(date_fin)s IS NULL OR o.date_ordonnance <= %(date_fin)s)
+        GROUP BY lo.designation
+        ORDER BY marge_totale DESC
+    """, {"date_debut": date_debut, "date_fin": date_fin})
+    lignes = cursor.fetchall()
+
+    resultat = []
+    for l in lignes:
+        cout_total = float(l["cout_total"] or 0)
+        recette_totale = float(l["recette_totale"] or 0)
+        marge_totale = recette_totale - cout_total
+        resultat.append({
+            "designation": l["designation"],
+            "quantite_vendue": l["quantite_vendue"],
+            "cout_total": cout_total,
+            "recette_totale": recette_totale,
+            "marge_totale": marge_totale,
+            "taux_marge_pct": round(marge_totale * 100 / cout_total, 1) if cout_total > 0 else 0,
+        })
+
+    totaux = {
+        "cout_total": sum(r["cout_total"] for r in resultat),
+        "recette_totale": sum(r["recette_totale"] for r in resultat),
+        "marge_totale": sum(r["marge_totale"] for r in resultat),
+    }
+    return {"lignes": resultat, "totaux": totaux}
 
 
 @router.get("/{ordonnance_id}")
@@ -397,7 +444,7 @@ def encaisser_ordonnance(ordonnance_id: int, request: Request, db=Depends(get_db
     par le patient en dehors du cabinet n'a rien à encaisser ici."""
     cursor = db.cursor()
     cursor.execute("""
-        SELECT o.id, o.type_beneficiaire, o.est_validee, o.paye, o.beneficiaire, p.nom, p.prenom
+        SELECT o.id, o.type_beneficiaire, o.est_validee, o.paye, o.beneficiaire, o.date_ordonnance, p.nom, p.prenom
         FROM ordonnance o
         LEFT JOIN patients p ON o.patient_id = p.id
         WHERE o.id = %s
@@ -424,6 +471,7 @@ def encaisser_ordonnance(ordonnance_id: int, request: Request, db=Depends(get_db
         return {"message": "Aucun médicament en stock cabinet à facturer", "montant": 0, "encaisse": False}
 
     cursor.execute("UPDATE ordonnance SET paye = true WHERE id = %s", (ordonnance_id,))
+    calculer_et_enregistrer_repartition(db, "ordonnance", ordonnance_id, montant, ordonnance["date_ordonnance"])
     db.commit()
     log_audit(db, request, user, "ENCAISSER", "ordonnance", ordonnance_id, None)
     patient_nom = f"{ordonnance['nom'] or ''} {ordonnance['prenom'] or ''}".strip() or ordonnance["beneficiaire"] or "-"
