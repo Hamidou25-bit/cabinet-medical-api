@@ -20,6 +20,7 @@ import type_soins
 import soins
 import utilisateurs
 import dossier
+import dossiers
 import dashboard
 import vaccinations
 import rendez_vous
@@ -56,6 +57,7 @@ app.include_router(type_soins.router)
 app.include_router(soins.router)
 app.include_router(utilisateurs.router)
 app.include_router(dossier.router)
+app.include_router(dossiers.router)
 app.include_router(dashboard.router)
 app.include_router(vaccinations.router)
 app.include_router(rendez_vous.router)

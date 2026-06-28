@@ -24,11 +24,15 @@ def _generer_numero_dossier(cursor):
 def get_patients(db=Depends(get_db), user=Depends(get_current_user)):
     cursor = db.cursor()
     cursor.execute("""
-        SELECT id, nom, prenom, age, sexe, telephone, adresse,
-               date_enregistrement, profession, ethnie, numero_dossier
-        FROM patients
-        WHERE supprime = 0 OR supprime IS NULL
-        ORDER BY date_enregistrement DESC, id DESC
+        SELECT p.id, p.nom, p.prenom, p.age, p.sexe, p.telephone, p.adresse,
+               p.date_enregistrement, p.profession, p.ethnie, p.numero_dossier,
+               COUNT(c.id) AS nb_consultations,
+               EXISTS(SELECT 1 FROM dossier_patients dp WHERE dp.patient_id = p.id) AS a_dossier
+        FROM patients p
+        LEFT JOIN consultations c ON c.patient_id = p.id
+        WHERE p.supprime = 0 OR p.supprime IS NULL
+        GROUP BY p.id
+        ORDER BY p.date_enregistrement DESC, p.id DESC
     """)
     return cursor.fetchall()
 

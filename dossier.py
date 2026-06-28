@@ -20,6 +20,10 @@ def get_dossier_patient(patient_id: int, db=Depends(get_db), user=Depends(get_cu
     if not patient:
         raise HTTPException(status_code=404, detail="Patient non trouvé")
 
+    cursor.execute("SELECT 1 FROM dossier_patients WHERE patient_id = %s", (patient_id,))
+    if not cursor.fetchone():
+        raise HTTPException(status_code=403, detail="Dossier non créé pour ce patient")
+
     cursor.execute("""
         SELECT c.id, c.date_consult, c.motif, c.diagnostic, c.observation,
                c.montant_total, m.nom AS medecin_nom
