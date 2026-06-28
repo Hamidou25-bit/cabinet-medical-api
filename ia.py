@@ -7,6 +7,11 @@ import httpx
 router = APIRouter(prefix="/ia", tags=["IA"])
 
 
+class Message(BaseModel):
+    role: str  # "user" ou "assistant"
+    content: str
+
+
 class DiagnosticRequest(BaseModel):
     motif: str
     age: int | None = None
@@ -14,26 +19,73 @@ class DiagnosticRequest(BaseModel):
     antecedents: str | None = None
 
 
-@router.post("/diagnostic")
-async def aide_diagnostic(data: DiagnosticRequest, user=Depends(require_role("admin", "medecin"))):
-    prompt = f"""Tu es un assistant médical pour un médecin en Afrique de l'Ouest (Mali).
+class ChatMedicalRequest(BaseModel):
+    messages: list[Message]
+    motif: str | None = None
+    age: int | None = None
+    sexe: str | None = None
+    antecedents: str | None = None
 
-Patient : {data.age or 'âge inconnu'} ans, {data.sexe or 'sexe inconnu'}
-Motif de consultation : {data.motif}
-Antécédents : {data.antecedents or 'aucun renseigné'}
 
-En tant qu'aide au diagnostic (pas un diagnostic définitif), propose :
+def _construire_system_prompt(motif, age, sexe, antecedents):
+    return f"""Tu es un assistant médical expert qui aide les médecins au Cabinet BabaMouneissa au Mali (Afrique de l'Ouest).
 
-1. DIAGNOSTICS POSSIBLES (liste les 3 plus probables avec pourcentage de probabilité)
-2. EXAMENS COMPLÉMENTAIRES SUGGÉRÉS (liste courte et pratique)
-3. TRAITEMENTS HABITUELS (médicaments courants avec posologie standard)
-4. SIGNES D'ALARME à surveiller
+Contexte patient :
+- Motif de consultation : {motif or 'non précisé'}
+- Âge : {age or 'non précisé'} ans
+- Sexe : {sexe or 'non précisé'}
+- Antécédents : {antecedents or 'aucun renseigné'}
 
-Réponds en français, de façon concise et structurée.
-IMPORTANT : Précise toujours que c'est une aide et que le médecin doit confirmer."""
+Contexte géographique : Mali, Afrique de l'Ouest.
+Maladies fréquentes : paludisme, typhoïde, infections respiratoires, diarrhées infectieuses, hypertension, diabète.
 
+Pour chaque réponse tu dois :
+
+1. DIAGNOSTICS POSSIBLES
+   - Lister les 3 diagnostics les plus probables
+   - Indiquer le pourcentage de probabilité pour chacun
+   - Expliquer brièvement pourquoi
+
+2. EXAMENS COMPLÉMENTAIRES
+   - Liste précise et pratique des examens à demander
+   - Préciser l'urgence (urgent / dans les 24h / peut attendre)
+
+3. TRAITEMENT PROPOSÉ
+   Pour chaque médicament, donner OBLIGATOIREMENT :
+   - Nom du médicament (DCI + nom commercial si connu au Mali)
+   - Forme : comprimé / sirop / injectable / sachet
+   - Dosage exact : ex. 500mg, 250mg/5ml
+   - Posologie complète : ex. "1 comprimé 3 fois par jour"
+   - Durée : ex. "pendant 7 jours"
+   - Voie d'administration : orale / intramusculaire / intraveineuse
+   - Précautions : contre-indications importantes si nécessaire
+
+   Exemple de format attendu :
+   💊 Paracétamol (Doliprane) — comprimé 500mg
+      → 2 comprimés (1g) toutes les 6h — voie orale — 5 jours
+      → Ne pas dépasser 4g/jour
+
+   💊 Arthémether-Luméfantrine (Coartem) — comprimé 20mg/120mg
+      → 4 comprimés à H0, H8, H24, H36, H48, H60
+      → Prendre avec un aliment gras
+      → Contre-indiqué 1er trimestre grossesse
+
+4. SIGNES D'ALARME
+   - Signes qui doivent amener le patient à revenir immédiatement
+   - Signes de gravité à surveiller
+
+5. SUIVI
+   - Date de contrôle recommandée
+   - Évolution attendue sous traitement
+
+Réponds toujours en français.
+Sois précis, pratique et adapté au contexte africain (médicaments disponibles au Mali).
+IMPORTANT : Rappelle toujours que c'est une aide et que le médecin reste seul responsable de la décision clinique finale."""
+
+
+async def _appeler_groq(messages):
     try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        async with httpx.AsyncClient(timeout=60.0) as client:
             response = await client.post(
                 "https://api.groq.com/openai/v1/chat/completions",
                 headers={
@@ -42,9 +94,9 @@ IMPORTANT : Précise toujours que c'est une aide et que le médecin doit confirm
                 },
                 json={
                     "model": "llama-3.3-70b-versatile",
-                    "messages": [{"role": "user", "content": prompt}],
-                    "max_tokens": 1024,
-                    "temperature": 0.3,
+                    "messages": messages,
+                    "max_tokens": 2048,
+                    "temperature": 0.2,
                 },
             )
     except httpx.RequestError:
@@ -54,5 +106,24 @@ IMPORTANT : Précise toujours que c'est une aide et que le médecin doit confirm
         raise HTTPException(status_code=500, detail="Erreur service IA")
 
     result = response.json()
-    texte = result["choices"][0]["message"]["content"]
+    return result["choices"][0]["message"]["content"]
+
+
+@router.post("/chat")
+async def chat_medical(data: ChatMedicalRequest, user=Depends(require_role("admin", "medecin"))):
+    system_prompt = _construire_system_prompt(data.motif, data.age, data.sexe, data.antecedents)
+    groq_messages = [{"role": "system", "content": system_prompt}]
+    groq_messages += [{"role": m.role, "content": m.content} for m in data.messages]
+    texte = await _appeler_groq(groq_messages)
+    return {"response": texte}
+
+
+@router.post("/diagnostic")
+async def aide_diagnostic(data: DiagnosticRequest, user=Depends(require_role("admin", "medecin"))):
+    system_prompt = _construire_system_prompt(data.motif, data.age, data.sexe, data.antecedents)
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": f"Motif de consultation : {data.motif}"},
+    ]
+    texte = await _appeler_groq(messages)
     return {"diagnostic": texte}
