@@ -43,7 +43,8 @@ def login(data: LoginData, request: Request, db=Depends(get_db)):
     token = create_access_token({
         "sub": user["nom_utilisateur"],
         "role": user["role"],
-        "id": user["id"]
+        "id": user["id"],
+        "medecin_id": user.get("medecin_id"),
     })
 
     log_audit(db, request, {"id": user["id"], "sub": user["nom_utilisateur"]}, "LOGIN", "utilisateurs", user["id"], None)

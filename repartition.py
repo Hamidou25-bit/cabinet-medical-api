@@ -109,12 +109,25 @@ def calculer_et_enregistrer_repartition(
 
 @router.get("/bilan-garde")
 def get_bilan_garde(
-    medecin_id: int,
     date_debut: str,
     date_fin: str,
+    medecin_id: int | None = None,
     db=Depends(get_db),
-    user=Depends(require_role("admin")),
+    user=Depends(get_current_user),
 ):
+    # Accès admin (choisit n'importe quel médecin) ou médecin (uniquement sa propre
+    # part - le compte doit être lié via utilisateurs.medecin_id, voir page Personnel).
+    if user["role"] not in ("admin", "medecin"):
+        raise HTTPException(status_code=403, detail="Accès refusé pour ce rôle")
+
+    is_self_service = user["role"] == "medecin"
+    if is_self_service:
+        medecin_id = user.get("medecin_id")
+        if not medecin_id:
+            raise HTTPException(status_code=400, detail="Votre compte n'est lié à aucun médecin. Contactez l'administrateur.")
+    elif medecin_id is None:
+        raise HTTPException(status_code=422, detail="medecin_id requis")
+
     cur = db.cursor()
     cur.execute("SELECT nom FROM medecin WHERE id = %s", (medecin_id,))
     medecin = cur.fetchone()
@@ -137,7 +150,12 @@ def get_bilan_garde(
         t["total"] += float(l["montant_total"])
         t["part_medecin"] += float(l["part_medecin"])
 
-    return {
+    if is_self_service:
+        # Le médecin ne doit voir que sa propre part, jamais ce qui revient au cabinet.
+        for l in lignes:
+            l.pop("part_cabinet", None)
+
+    result = {
         "medecin_id": medecin_id,
         "medecin_nom": medecin["nom"],
         "date_debut": date_debut,
@@ -145,7 +163,49 @@ def get_bilan_garde(
         "total_actes": len(lignes),
         "total_encaisse": sum(float(l["montant_total"]) for l in lignes),
         "total_medecin": sum(float(l["part_medecin"]) for l in lignes),
-        "total_cabinet": sum(float(l["part_cabinet"]) for l in lignes),
+        "par_type": par_type,
+        "lignes": lignes,
+    }
+    if not is_self_service:
+        result["total_cabinet"] = sum(float(l.get("part_cabinet") or 0) for l in lignes)
+    return result
+
+
+@router.get("/bilan-garde-laborantin")
+def get_bilan_garde_laborantin(
+    date_debut: str,
+    date_fin: str,
+    db=Depends(get_db),
+    user=Depends(require_role("laborantin")),
+):
+    # Self-service laborantin : fait_par_id (examens_complementaires) référence déjà
+    # utilisateurs(id), donc aucun lien supplémentaire n'est nécessaire ici (contrairement
+    # au médecin, dont l'ID référencé par les actes vient d'une table medecin séparée).
+    laborantin_id = user["id"]
+    cur = db.cursor()
+    cur.execute("""
+        SELECT reference_type, reference_id, montant_total, part_laborantin,
+               laborantin_verse, laborantin_verse_le, date_acte
+        FROM repartition_recettes
+        WHERE laborantin_id = %s AND date_acte BETWEEN %s AND %s
+        ORDER BY date_acte DESC, id DESC
+    """, (laborantin_id, date_debut, date_fin))
+    lignes = cur.fetchall()
+
+    par_type = {}
+    for l in lignes:
+        t = par_type.setdefault(l["reference_type"], {"count": 0, "total": 0.0, "part_laborantin": 0.0})
+        t["count"] += 1
+        t["total"] += float(l["montant_total"])
+        t["part_laborantin"] += float(l["part_laborantin"])
+
+    return {
+        "laborantin_id": laborantin_id,
+        "date_debut": date_debut,
+        "date_fin": date_fin,
+        "total_actes": len(lignes),
+        "total_encaisse": sum(float(l["montant_total"]) for l in lignes),
+        "total_laborantin": sum(float(l["part_laborantin"]) for l in lignes),
         "par_type": par_type,
         "lignes": lignes,
     }

@@ -19,7 +19,7 @@ def require_admin(user=Depends(get_current_user)):
 def list_utilisateurs(db=Depends(get_db), user=Depends(require_admin)):
     cursor = db.cursor()
     cursor.execute("""
-        SELECT id, nom_utilisateur, nom_complet, role, actif
+        SELECT id, nom_utilisateur, nom_complet, role, actif, medecin_id
         FROM utilisateurs
         ORDER BY nom_utilisateur
     """)
@@ -32,6 +32,9 @@ def create_utilisateur(data: dict, request: Request, db=Depends(get_db), user=De
     mot_de_passe = data.get("mot_de_passe") or ""
     role = data.get("role") or ""
     nom_complet = (data.get("nom_complet") or "").strip()
+    # medecin_id n'a de sens que pour le rôle medecin (lien vers la table medecin,
+    # nécessaire au self-service du Bilan de garde) - ignoré silencieusement sinon.
+    medecin_id = data.get("medecin_id") if role == "medecin" else None
 
     if not nom_utilisateur or not mot_de_passe or not role:
         raise HTTPException(status_code=422, detail="Champs obligatoires : nom_utilisateur, mot_de_passe, role")
@@ -42,14 +45,15 @@ def create_utilisateur(data: dict, request: Request, db=Depends(get_db), user=De
     cursor = db.cursor()
     try:
         cursor.execute("""
-            INSERT INTO utilisateurs (nom_utilisateur, mot_de_passe_hash, nom_complet, role, actif)
-            VALUES (%(nom_utilisateur)s, %(hash)s, %(nom_complet)s, %(role)s, true)
+            INSERT INTO utilisateurs (nom_utilisateur, mot_de_passe_hash, nom_complet, role, actif, medecin_id)
+            VALUES (%(nom_utilisateur)s, %(hash)s, %(nom_complet)s, %(role)s, true, %(medecin_id)s)
             RETURNING id
         """, {
             "nom_utilisateur": nom_utilisateur,
             "hash": hashed,
             "nom_complet": nom_complet,
             "role": role,
+            "medecin_id": medecin_id,
         })
         db.commit()
         new_id = cursor.fetchone()["id"]
@@ -57,12 +61,17 @@ def create_utilisateur(data: dict, request: Request, db=Depends(get_db), user=De
             "nom_utilisateur": nom_utilisateur,
             "nom_complet": nom_complet,
             "role": role,
+            "medecin_id": medecin_id,
         })
         return {"message": "Utilisateur créé", "id": new_id}
+    except HTTPException:
+        raise
     except Exception as e:
         db.rollback()
         if "unique" in str(e).lower() or "duplicate" in str(e).lower():
             raise HTTPException(status_code=409, detail="Ce login est déjà utilisé")
+        if "foreign key" in str(e).lower():
+            raise HTTPException(status_code=422, detail="Médecin sélectionné invalide")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -71,6 +80,7 @@ def update_utilisateur(utilisateur_id: int, data: dict, request: Request, db=Dep
     nom_utilisateur = (data.get("nom_utilisateur") or "").strip()
     role = (data.get("role") or "").strip()
     nom_complet = (data.get("nom_complet") or "").strip()
+    medecin_id = data.get("medecin_id") if role == "medecin" else None
 
     if not nom_utilisateur or not role:
         raise HTTPException(status_code=422, detail="Champs obligatoires : nom_utilisateur, role")
@@ -83,12 +93,14 @@ def update_utilisateur(utilisateur_id: int, data: dict, request: Request, db=Dep
             UPDATE utilisateurs
             SET nom_utilisateur = %(nom_utilisateur)s,
                 nom_complet = %(nom_complet)s,
-                role = %(role)s
+                role = %(role)s,
+                medecin_id = %(medecin_id)s
             WHERE id = %(id)s
         """, {
             "nom_utilisateur": nom_utilisateur,
             "nom_complet": nom_complet,
             "role": role,
+            "medecin_id": medecin_id,
             "id": utilisateur_id,
         })
         if cursor.rowcount == 0:
@@ -98,6 +110,7 @@ def update_utilisateur(utilisateur_id: int, data: dict, request: Request, db=Dep
             "nom_utilisateur": nom_utilisateur,
             "nom_complet": nom_complet,
             "role": role,
+            "medecin_id": medecin_id,
         })
         return {"message": "Utilisateur mis à jour"}
     except HTTPException:
@@ -106,6 +119,8 @@ def update_utilisateur(utilisateur_id: int, data: dict, request: Request, db=Dep
         db.rollback()
         if "unique" in str(e).lower() or "duplicate" in str(e).lower():
             raise HTTPException(status_code=409, detail="Ce login est déjà utilisé")
+        if "foreign key" in str(e).lower():
+            raise HTTPException(status_code=422, detail="Médecin sélectionné invalide")
         raise HTTPException(status_code=500, detail=str(e))
 
 
