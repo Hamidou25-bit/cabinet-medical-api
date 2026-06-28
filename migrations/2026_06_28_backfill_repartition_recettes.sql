@@ -1,0 +1,33 @@
+-- Backfill repartition_recettes pour les actes payes avant la creation de la table (Phase 24, 26/06/2026).
+-- Contrairement au backfill paye=true de la Phase 20, aucun backfill equivalent n'avait ete fait pour
+-- repartition_recettes : seuls les encaissements effectues apres le 26/06/2026 avaient une ligne.
+-- Perimetre choisi (decision utilisateur, 28/06/2026) : consultations + examens deja payes avec
+-- medecin_id/fait_par_id renseigne (soins et ordonnances restent 100% cabinet, non concernes par
+-- le Bilan de garde). Idempotent grace a la contrainte UNIQUE(reference_type, reference_id) deja
+-- presente sur repartition_recettes (ON CONFLICT DO NOTHING dans calculer_et_enregistrer_repartition).
+--
+-- Ce script documente le backfill applique manuellement via un script Python reutilisant
+-- calculer_et_enregistrer_repartition() (api/repartition.py) pour garantir les memes taux/regles
+-- que le code de production, plutot que de dupliquer la logique en SQL pur. Execution :
+--
+--   cd /home/ubuntu/api && python3 -c "
+--   from database import get_db
+--   from repartition import calculer_et_enregistrer_repartition
+--   gen = get_db(); db = next(gen)
+--   cur = db.cursor()
+--   cur.execute('''SELECT id, montant_total, date_consult, medecin_id FROM consultations
+--                  WHERE paye = true AND medecin_id IS NOT NULL''')
+--   for c in cur.fetchall():
+--       calculer_et_enregistrer_repartition(db, 'consultation', c['id'], float(c['montant_total']),
+--                                            c['date_consult'], medecin_id=c['medecin_id'])
+--   cur.execute('''SELECT id, prix, date_examen, medecin_id, fait_par_id FROM examens_complementaires
+--                  WHERE paye = true AND (medecin_id IS NOT NULL OR fait_par_id IS NOT NULL)''')
+--   for e in cur.fetchall():
+--       calculer_et_enregistrer_repartition(db, 'examen', e['id'], float(e['prix']), e['date_examen'],
+--                                            medecin_id=e['medecin_id'], laborantin_id=e['fait_par_id'])
+--   db.commit(); gen.close()
+--   "
+--
+-- Applique le 28/06/2026 sur production : 4 consultations + 2 examens backfilles (3 consultations +
+-- 2 examens reellement nouveaux, consultation #44 deja presente via encaissement post-Phase 24).
+-- pg_dump pris avant : ~/backups/avant_backfill_repartition_20260628_105315.sql
