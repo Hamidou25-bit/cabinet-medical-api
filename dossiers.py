@@ -6,7 +6,7 @@ from audit_log import log_audit
 
 router = APIRouter(prefix="/dossiers", tags=["Dossiers"])
 
-NB_CONSULTATIONS_MIN = 2
+NB_CONSULTATIONS_MIN = 1
 
 
 @router.post("/")
