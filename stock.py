@@ -1,7 +1,7 @@
 from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, Request
 from database import get_db
-from auth import require_role
+from auth import require_role, get_current_user
 from validation import require_fields, require_positive
 from audit_log import log_audit
 
@@ -37,6 +37,24 @@ def get_designations(db=Depends(get_db), user=Depends(require_role("admin", "med
         WHERE categorie = 'medicament'
         ORDER BY "Designation"
     """)
+    return cursor.fetchall()
+
+@router.get("/disponibilite")
+def get_stock_disponibilite(q: str = "", db=Depends(get_db), user=Depends(get_current_user)):
+    cursor = db.cursor()
+    cursor.execute("""
+        SELECT "idStock" as id, "Designation" as designation,
+               "Dosage" as dosage, "Forme" as forme,
+               "Quantite" as quantite, "SeuilAlerte" as seuil_alerte,
+               "PrixVente" as prix_vente, "PrixAchat" as prix_achat,
+               categorie
+        FROM stock
+        WHERE LOWER("Designation") LIKE LOWER(%s)
+          AND "Quantite" > 0
+          AND categorie = 'medicament'
+        ORDER BY "Designation" ASC
+        LIMIT 15
+    """, (f'%{q}%',))
     return cursor.fetchall()
 
 @router.get("/alertes")
