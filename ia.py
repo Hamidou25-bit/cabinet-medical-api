@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-from auth import require_role
+from auth import require_role, get_current_user
+from database import get_db
 from config import GROQ_API_KEY
 import httpx
 
@@ -25,6 +26,15 @@ class ChatMedicalRequest(BaseModel):
     age: int | None = None
     sexe: str | None = None
     antecedents: str | None = None
+
+
+class MessageHistorique(BaseModel):
+    role: str
+    contenu: str
+
+
+class HistoriquePayload(BaseModel):
+    messages: list[MessageHistorique]
 
 
 def _construire_system_prompt(motif, age, sexe, antecedents):
@@ -109,13 +119,60 @@ async def _appeler_groq(messages):
     return result["choices"][0]["message"]["content"]
 
 
+@router.get("/historique")
+def get_historique(db=Depends(get_db), user=Depends(get_current_user)):
+    cur = db.cursor()
+    cur.execute("""
+        SELECT id, role, contenu, date_message
+        FROM ia_conversations
+        WHERE utilisateur_id = %s
+        ORDER BY date_message ASC
+    """, (user['id'],))
+    rows = cur.fetchall()
+    return [dict(r) for r in rows]
+
+
+@router.post("/historique")
+def save_messages(payload: HistoriquePayload, db=Depends(get_db), user=Depends(get_current_user)):
+    cur = db.cursor()
+    for msg in payload.messages:
+        cur.execute(
+            "INSERT INTO ia_conversations (utilisateur_id, role, contenu) VALUES (%s, %s, %s)",
+            (user['id'], msg.role, msg.contenu)
+        )
+    db.commit()
+    return {"saved": len(payload.messages)}
+
+
+@router.delete("/historique")
+def delete_historique(db=Depends(get_db), user=Depends(get_current_user)):
+    cur = db.cursor()
+    cur.execute("DELETE FROM ia_conversations WHERE utilisateur_id = %s", (user['id'],))
+    db.commit()
+    return {"deleted": cur.rowcount}
+
+
 @router.post("/chat")
-async def chat_medical(data: ChatMedicalRequest, user=Depends(require_role("admin", "medecin"))):
+async def chat_medical(data: ChatMedicalRequest, db=Depends(get_db), user=Depends(require_role("admin", "medecin"))):
     system_prompt = _construire_system_prompt(data.motif, data.age, data.sexe, data.antecedents)
     groq_messages = [{"role": "system", "content": system_prompt}]
     groq_messages += [{"role": m.role, "content": m.content} for m in data.messages]
     texte = await _appeler_groq(groq_messages)
-    return {"response": texte}
+
+    # Sauvegarder l'échange en base (dernier message user + réponse assistant)
+    user_msg = data.messages[-1].content if data.messages else ''
+    cur = db.cursor()
+    cur.execute(
+        "INSERT INTO ia_conversations (utilisateur_id, role, contenu) VALUES (%s, %s, %s)",
+        (user['id'], 'user', user_msg)
+    )
+    cur.execute(
+        "INSERT INTO ia_conversations (utilisateur_id, role, contenu) VALUES (%s, %s, %s)",
+        (user['id'], 'assistant', texte)
+    )
+    db.commit()
+
+    return {"reply": texte}
 
 
 @router.post("/diagnostic")
