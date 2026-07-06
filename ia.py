@@ -103,10 +103,11 @@ async def _appeler_groq(messages):
                     "Content-Type": "application/json",
                 },
                 json={
-                    "model": "llama-3.3-70b-versatile",
+                    "model": "openai/gpt-oss-120b",
                     "messages": messages,
                     "max_tokens": 2048,
                     "temperature": 0.2,
+                    "reasoning_effort": "low",
                 },
             )
     except httpx.RequestError:
