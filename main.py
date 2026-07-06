@@ -1,5 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 import patients
 import consultations
 import stock
@@ -28,8 +29,10 @@ import audit_logs
 import parametres
 import repartition
 import ia
+import ocr_ordonnance
 
 app = FastAPI(title="Cabinet Médical BabaMouneissa API")
+app.mount("/uploads/ocr_temp", StaticFiles(directory=str(ocr_ordonnance.UPLOAD_DIR)), name="ocr_temp")
 
 app.add_middleware(
     CORSMiddleware,
@@ -66,6 +69,7 @@ app.include_router(audit_logs.router)
 app.include_router(parametres.router)
 app.include_router(repartition.router)
 app.include_router(ia.router)
+app.include_router(ocr_ordonnance.router)
 app.include_router(auth.router)
 
 @app.get("/")
