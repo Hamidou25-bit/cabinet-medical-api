@@ -59,8 +59,9 @@ async def _appeler_groq_vision(image_b64: str, mime: str) -> str:
                             ],
                         }
                     ],
-                    "max_tokens": 1024,
+                    "max_tokens": 2048,
                     "temperature": 0.1,
+                    "reasoning_effort": "none",
                 },
             )
     except httpx.RequestError:
