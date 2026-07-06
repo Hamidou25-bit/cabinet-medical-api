@@ -34,7 +34,9 @@ def _nettoyer_et_parser_json(texte: str) -> dict:
     fin = texte.rfind("}")
     if debut == -1 or fin == -1 or fin < debut:
         raise ValueError("JSON introuvable dans la réponse du modèle")
-    return json.loads(texte[debut:fin + 1])
+    texte_json = texte[debut:fin + 1]
+    print(f"[OCR-DEBUG] Texte avant parsing JSON: {texte_json}")
+    return json.loads(texte_json)
 
 
 async def _appeler_groq_vision(image_b64: str, mime: str) -> str:
@@ -64,6 +66,9 @@ async def _appeler_groq_vision(image_b64: str, mime: str) -> str:
     except httpx.RequestError:
         raise HTTPException(status_code=500, detail="Service IA inaccessible")
 
+    print(f"[OCR-DEBUG] Groq status: {response.status_code}")
+    print(f"[OCR-DEBUG] Groq raw body: {response.text[:500]}")
+
     if response.status_code != 200:
         raise HTTPException(status_code=422, detail="Extraction impossible, saisie manuelle nécessaire")
 
@@ -88,7 +93,8 @@ async def extraire_ordonnance(photo: UploadFile = File(...), db=Depends(get_db),
 
     try:
         extraction = _nettoyer_et_parser_json(texte)
-    except (ValueError, json.JSONDecodeError):
+    except (ValueError, json.JSONDecodeError) as e:
+        print(f"[OCR-DEBUG] Exception parsing: {str(e)}")
         raise HTTPException(status_code=422, detail="Extraction impossible, saisie manuelle nécessaire")
 
     patient_existant = None
