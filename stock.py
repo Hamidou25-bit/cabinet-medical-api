@@ -4,6 +4,7 @@ from database import get_db
 from auth import require_role, get_current_user
 from validation import require_fields, require_positive
 from audit_log import log_audit
+from stock_utils import valider_categorie_et_unites, convertir_en_unites
 
 router = APIRouter(prefix="/stock", tags=["Stock"])
 
@@ -18,7 +19,7 @@ def get_stock(categorie: str = None, db=Depends(get_db), user=Depends(require_ro
     cursor.execute(f"""
         SELECT "idStock", "DateEntree", "Type", "Designation", "Fournisseur",
                "Quantite", "SeuilAlerte", "PrixVente", "PrixAchat",
-               "Dosage", "Forme", "DatePeremption", categorie
+               "Dosage", "Forme", "DatePeremption", categorie, unites_par_boite
         FROM stock
         {where_clause}
         ORDER BY "Designation"
@@ -64,6 +65,7 @@ def get_alertes(db=Depends(get_db), user=Depends(require_role("admin"))):
         SELECT "idStock", "Designation", "Quantite", "SeuilAlerte", categorie
         FROM stock
         WHERE "Quantite" <= "SeuilAlerte"
+          AND categorie <> 'equipement'
         ORDER BY "Quantite"
     """)
     return cursor.fetchall()
@@ -84,14 +86,15 @@ def get_alertes_peremption(db=Depends(get_db), user=Depends(require_role("admin"
 @router.post("/")
 def create_article(article: dict, request: Request, db=Depends(get_db), user=Depends(require_role("admin"))):
     require_fields(article, ["Designation", "Quantite", "PrixVente"])
+    unites_par_boite = valider_categorie_et_unites(article)
     cursor = db.cursor()
     cursor.execute("""
         INSERT INTO stock ("DateEntree", "Type", "Designation", "Fournisseur",
                           "Quantite", "SeuilAlerte", "PrixVente", "PrixAchat",
-                          "Dosage", "Forme", "DatePeremption", categorie)
+                          "Dosage", "Forme", "DatePeremption", categorie, unites_par_boite)
         VALUES (%(DateEntree)s, %(Type)s, %(Designation)s, %(Fournisseur)s,
                 %(Quantite)s, %(SeuilAlerte)s, %(PrixVente)s, %(PrixAchat)s,
-                %(Dosage)s, %(Forme)s, %(DatePeremption)s, %(categorie)s)
+                %(Dosage)s, %(Forme)s, %(DatePeremption)s, %(categorie)s, %(unites_par_boite)s)
         RETURNING "idStock"
     """, {
         "DateEntree": article.get("DateEntree"),
@@ -106,6 +109,7 @@ def create_article(article: dict, request: Request, db=Depends(get_db), user=Dep
         "Forme": article.get("Forme"),
         "DatePeremption": article.get("DatePeremption"),
         "categorie": article.get("categorie", "medicament"),
+        "unites_par_boite": unites_par_boite,
     })
     db.commit()
     new_id = cursor.fetchone()["idStock"]
@@ -116,6 +120,7 @@ def create_article(article: dict, request: Request, db=Depends(get_db), user=Dep
 @router.put("/{stock_id}")
 def update_article(stock_id: int, article: dict, request: Request, db=Depends(get_db), user=Depends(require_role("admin"))):
     require_fields(article, ["Designation", "Quantite", "PrixVente"])
+    unites_par_boite = valider_categorie_et_unites(article)
     cursor = db.cursor()
     cursor.execute("""
         UPDATE stock
@@ -130,7 +135,8 @@ def update_article(stock_id: int, article: dict, request: Request, db=Depends(ge
             "Dosage" = %(Dosage)s,
             "Forme" = %(Forme)s,
             "DatePeremption" = %(DatePeremption)s,
-            categorie = %(categorie)s
+            categorie = %(categorie)s,
+            unites_par_boite = %(unites_par_boite)s
         WHERE "idStock" = %(idStock)s
     """, {
         "DateEntree": article.get("DateEntree"),
@@ -145,6 +151,7 @@ def update_article(stock_id: int, article: dict, request: Request, db=Depends(ge
         "Forme": article.get("Forme"),
         "DatePeremption": article.get("DatePeremption"),
         "categorie": article.get("categorie", "medicament"),
+        "unites_par_boite": unites_par_boite,
         "idStock": stock_id,
     })
     if cursor.rowcount == 0:
@@ -152,6 +159,39 @@ def update_article(stock_id: int, article: dict, request: Request, db=Depends(ge
     db.commit()
     log_audit(db, request, user, "UPDATE", "stock", stock_id, article)
     return {"message": "Article mis à jour"}
+
+
+@router.post("/{stock_id}/reapprovisionner")
+def reapprovisionner_article(stock_id: int, data: dict, request: Request, db=Depends(get_db), user=Depends(require_role("admin"))):
+    """Ajoute du stock à un article existant, soit en unités directes
+    (quantite_unites), soit en boîtes (nombre_boites × unites_par_boite).
+    Exactement un des deux champs doit être fourni."""
+    quantite_unites = data.get("quantite_unites")
+    nombre_boites = data.get("nombre_boites")
+    cursor = db.cursor()
+    unites_ajoutees = convertir_en_unites(cursor, stock_id, quantite_unites, nombre_boites)
+
+    cursor.execute(
+        'UPDATE stock SET "Quantite" = "Quantite" + %s WHERE "idStock" = %s RETURNING "Quantite"',
+        (unites_ajoutees, stock_id),
+    )
+    row = cursor.fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="Article non trouvé")
+    nouvelle_quantite = row["Quantite"]
+    db.commit()
+    champ = "quantite_unites" if quantite_unites is not None else "nombre_boites"
+    log_audit(db, request, user, "UPDATE", "stock", stock_id, {
+        "action": "reapprovisionnement",
+        champ: int(quantite_unites if quantite_unites is not None else nombre_boites),
+        "unites_ajoutees": unites_ajoutees,
+        "nouvelle_quantite": nouvelle_quantite,
+    })
+    return {
+        "message": "Stock réapprovisionné",
+        "unites_ajoutees": unites_ajoutees,
+        "nouvelle_quantite": nouvelle_quantite,
+    }
 
 
 @router.post("/sortie")

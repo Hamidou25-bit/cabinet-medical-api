@@ -4,6 +4,7 @@ from database import get_db
 from auth import get_current_user, require_role
 from validation import require_fields, require_positive
 from audit_log import log_audit
+from stock_utils import valider_categorie_et_unites, convertir_en_unites
 
 router = APIRouter(prefix="/achats", tags=["Achats"])
 
@@ -27,7 +28,7 @@ def get_achats(db=Depends(get_db), user=Depends(get_current_user)):
     if achats:
         ids = [a["id"] for a in achats]
         cursor.execute("""
-            SELECT achat_id, designation, quantite, prix_unitaire, montant, type_article
+            SELECT achat_id, designation, quantite, prix_unitaire, montant, type_article, nombre_boites
             FROM lignes_achat
             WHERE achat_id = ANY(%(ids)s)
             ORDER BY id
@@ -70,16 +71,20 @@ def _get_fournisseur_nom(cursor, fournisseur_id):
 
 
 def _creer_article_stock_pour_ligne(cursor, ligne, date_achat, fournisseur_nom):
-    """Crée un nouvel article de stock pour une ligne d'achat sans correspondance, et retourne son idStock."""
+    """Crée un nouvel article de stock pour une ligne d'achat sans correspondance, et retourne son idStock.
+    La ligne peut fournir categorie et unites_par_boite pour configurer le nouvel article
+    (sinon défauts : medicament / 1). Ces champs sont ignorés quand la ligne référence
+    un article existant (stock_id) — l'article garde alors sa configuration."""
     quantite = ligne.get("quantite", 1)
     prix_unitaire = ligne.get("prix_unitaire", 0)
+    unites_par_boite = valider_categorie_et_unites(ligne)
     cursor.execute("""
         INSERT INTO stock ("DateEntree", "Type", "Designation", "Fournisseur",
                           "Quantite", "SeuilAlerte", "PrixVente", "PrixAchat",
-                          "Dosage", "Forme", "DatePeremption")
+                          "Dosage", "Forme", "DatePeremption", categorie, unites_par_boite)
         VALUES (%(DateEntree)s, %(Type)s, %(Designation)s, %(Fournisseur)s,
                 %(Quantite)s, %(SeuilAlerte)s, %(PrixVente)s, %(PrixAchat)s,
-                %(Dosage)s, %(Forme)s, %(DatePeremption)s)
+                %(Dosage)s, %(Forme)s, %(DatePeremption)s, %(categorie)s, %(unites_par_boite)s)
         RETURNING "idStock"
     """, {
         "DateEntree": date_achat,
@@ -93,6 +98,8 @@ def _creer_article_stock_pour_ligne(cursor, ligne, date_achat, fournisseur_nom):
         "Dosage": ligne.get("dosage"),
         "Forme": ligne.get("forme"),
         "DatePeremption": ligne.get("date_peremption"),
+        "categorie": ligne.get("categorie", "medicament"),
+        "unites_par_boite": unites_par_boite,
     })
     return cursor.fetchone()["idStock"]
 
@@ -101,8 +108,8 @@ def _inserer_ligne_achat(cursor, achat_id, ligne, stock_id, stock_cree=False):
     quantite = ligne.get("quantite", 1)
     prix_unitaire = ligne.get("prix_unitaire", 0)
     cursor.execute("""
-        INSERT INTO lignes_achat (achat_id, designation, quantite, prix_unitaire, montant, type_article, stock_id, stock_cree)
-        VALUES (%(achat_id)s, %(designation)s, %(quantite)s, %(prix_unitaire)s, %(montant)s, %(type_article)s, %(stock_id)s, %(stock_cree)s)
+        INSERT INTO lignes_achat (achat_id, designation, quantite, prix_unitaire, montant, type_article, stock_id, stock_cree, nombre_boites)
+        VALUES (%(achat_id)s, %(designation)s, %(quantite)s, %(prix_unitaire)s, %(montant)s, %(type_article)s, %(stock_id)s, %(stock_cree)s, %(nombre_boites)s)
     """, {
         "achat_id": achat_id,
         "designation": ligne["designation"],
@@ -112,6 +119,7 @@ def _inserer_ligne_achat(cursor, achat_id, ligne, stock_id, stock_cree=False):
         "type_article": ligne.get("type_article"),
         "stock_id": stock_id,
         "stock_cree": stock_cree,
+        "nombre_boites": ligne.get("nombre_boites"),
     })
 
 
@@ -216,7 +224,37 @@ def _validate_achat(data: dict):
         raise HTTPException(status_code=400, detail="Champ(s) obligatoire(s) manquant(s) : lignes (au moins un article)")
     for ligne in lignes:
         require_fields(ligne, ["designation"])
-        require_positive(ligne, ["quantite", "prix_unitaire"])
+        if (ligne.get("quantite") is None) == (ligne.get("nombre_boites") is None):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Ligne « {ligne.get('designation')} » : fournir soit quantite (unités), soit nombre_boites (exactement un des deux)",
+            )
+        if ligne.get("nombre_boites") is None:
+            require_positive(ligne, ["quantite", "prix_unitaire"])
+        else:
+            # nombre_boites est validé (entier >= 1) par convertir_en_unites()
+            require_positive(ligne, ["prix_unitaire"])
+
+
+def _resoudre_quantites_lignes(cursor, lignes):
+    """Convertit en unités les lignes saisies en boîtes (nombre_boites), AVANT tout
+    calcul de montant et toute écriture : lignes_achat.quantite reste la valeur
+    canonique en unités (montant, mouvements de stock et annulation via
+    _retirer_lignes_du_stock inchangés). nombre_boites est conservé tel quel sur la
+    ligne, uniquement pour l'affichage/la réédition."""
+    for ligne in lignes:
+        nombre_boites = ligne.get("nombre_boites")
+        if nombre_boites is None:
+            continue  # ligne saisie en unités : comportement historique inchangé
+        stock_id = ligne.get("stock_id")
+        if stock_id:
+            # l'article existant fait foi (categorie/unites_par_boite de la ligne ignorés)
+            ligne["quantite"] = convertir_en_unites(cursor, stock_id, None, nombre_boites)
+        else:
+            ligne["quantite"] = convertir_en_unites(
+                cursor, None, None, nombre_boites,
+                unites_par_boite=ligne.get("unites_par_boite"),
+            )
 
 
 def _generer_numero_facture(cursor):
@@ -240,6 +278,7 @@ def create_achat(data: dict, request: Request, db=Depends(get_db), user=Depends(
     _validate_achat(data)
     cursor = db.cursor()
     lignes = data.get("lignes", [])
+    _resoudre_quantites_lignes(cursor, lignes)
     montant_total = sum(l.get("quantite", 1) * l.get("prix_unitaire", 0) for l in lignes)
     fournisseur_nom = _get_fournisseur_nom(cursor, data.get("fournisseur_id"))
     numero_facture = _generer_numero_facture(cursor)
@@ -272,6 +311,7 @@ def update_achat(achat_id: int, data: dict, request: Request, db=Depends(get_db)
     _validate_achat(data)
     cursor = db.cursor()
     lignes = data.get("lignes", [])
+    _resoudre_quantites_lignes(cursor, lignes)
     montant_total = sum(l.get("quantite", 1) * l.get("prix_unitaire", 0) for l in lignes)
     fournisseur_nom = _get_fournisseur_nom(cursor, data.get("fournisseur_id"))
 
