@@ -88,10 +88,11 @@ def _restaurer_stock_ordonnance(cursor, ordonnance_id):
         _appliquer_mouvement_stock(cursor, ligne["stock_id"], ligne["quantite"], 1)
 
 
-def _resoudre_soins_ordonnance(soins, type_beneficiaire, patient_id, beneficiaire, date_ordonnance):
+def _resoudre_soins_ordonnance(soins, type_beneficiaire, patient_id, beneficiaire, date_ordonnance, medecin_id=None):
     """Valide et prépare les soins saisis depuis le formulaire Ordonnance.
     Ignoré pour le type_beneficiaire 'interne' (un soin n'a pas de sens en usage interne).
-    Le patient/bénéficiaire et la date sont repris de l'ordonnance elle-même."""
+    Le patient/bénéficiaire, la date et le médecin (prescripteur) sont repris de
+    l'ordonnance elle-même."""
     if type_beneficiaire not in ("patient", "tiers") or not soins:
         return []
     resolues = []
@@ -105,6 +106,7 @@ def _resoudre_soins_ordonnance(soins, type_beneficiaire, patient_id, beneficiair
             "prix_applique": soin.get("prix_applique", 0),
             "date_soin": date_ordonnance,
             "notes": soin.get("notes"),
+            "medecin_id": medecin_id,
         })
     return resolues
 
@@ -330,7 +332,8 @@ def create_ordonnance(data: dict, request: Request, db=Depends(get_db), user=Dep
         })
 
     soins_resolus = _resoudre_soins_ordonnance(
-        data.get("soins", []), type_beneficiaire, data.get("patient_id"), data.get("beneficiaire"), data["date_ordonnance"]
+        data.get("soins", []), type_beneficiaire, data.get("patient_id"), data.get("beneficiaire"), data["date_ordonnance"],
+        medecin_id=data.get("medecin_id"),
     )
     for soin in soins_resolus:
         inserer_soin(cursor, soin, ordonnance_id)
@@ -415,7 +418,8 @@ def update_ordonnance(ordonnance_id: int, data: dict, request: Request, db=Depen
         })
 
     soins_resolus = _resoudre_soins_ordonnance(
-        data.get("soins", []), type_beneficiaire, data.get("patient_id"), data.get("beneficiaire"), data["date_ordonnance"]
+        data.get("soins", []), type_beneficiaire, data.get("patient_id"), data.get("beneficiaire"), data["date_ordonnance"],
+        medecin_id=data.get("medecin_id"),
     )
     cursor.execute("DELETE FROM soins WHERE ordonnance_id = %s", (ordonnance_id,))
     for soin in soins_resolus:

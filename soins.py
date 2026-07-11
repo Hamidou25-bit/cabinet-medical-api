@@ -13,8 +13,8 @@ def inserer_soin(cursor, soin_data, ordonnance_id=None):
     Réutilisé par la création directe (POST /soins) et par la saisie groupée
     depuis le formulaire Ordonnance (api/ordonnances.py)."""
     cursor.execute("""
-        INSERT INTO soins (type_soin_id, patient_id, nom_patient_externe, prix_applique, date_soin, notes, ordonnance_id, type_de_soins, montant_total)
-        VALUES (%(type_soin_id)s, %(patient_id)s, %(nom_patient_externe)s, %(prix_applique)s, %(date_soin)s, %(notes)s, %(ordonnance_id)s, '', 0)
+        INSERT INTO soins (type_soin_id, patient_id, nom_patient_externe, prix_applique, date_soin, notes, medecin_id, ordonnance_id, type_de_soins, montant_total)
+        VALUES (%(type_soin_id)s, %(patient_id)s, %(nom_patient_externe)s, %(prix_applique)s, %(date_soin)s, %(notes)s, %(medecin_id)s, %(ordonnance_id)s, '', 0)
         RETURNING id
     """, {
         "type_soin_id": soin_data["type_soin_id"],
@@ -23,6 +23,7 @@ def inserer_soin(cursor, soin_data, ordonnance_id=None):
         "prix_applique": soin_data["prix_applique"],
         "date_soin": soin_data["date_soin"],
         "notes": soin_data.get("notes"),
+        "medecin_id": soin_data.get("medecin_id"),
         "ordonnance_id": ordonnance_id,
     })
     return cursor.fetchone()["id"]
@@ -62,10 +63,12 @@ def get_soins(
         SELECT s.id, s.date_soin, s.prix_applique, s.notes, s.paye,
                s.patient_id, s.nom_patient_externe, s.ordonnance_id,
                p.nom AS patient_nom, p.prenom AS patient_prenom,
-               ts.id AS type_soin_id, ts.nom AS type_soin_nom, ts.prix_defaut
+               ts.id AS type_soin_id, ts.nom AS type_soin_nom, ts.prix_defaut,
+               s.medecin_id, m.nom AS medecin_nom
         FROM soins s
         LEFT JOIN patients p ON s.patient_id = p.id
         LEFT JOIN type_soin ts ON s.type_soin_id = ts.id
+        LEFT JOIN medecin m ON s.medecin_id = m.id
         {where}
         ORDER BY s.date_soin DESC, s.id DESC
     """, params)
@@ -79,10 +82,12 @@ def get_soin(soin_id: int, db=Depends(get_db), user=Depends(get_current_user)):
         SELECT s.id, s.date_soin, s.prix_applique, s.notes,
                s.patient_id, s.nom_patient_externe,
                p.nom AS patient_nom, p.prenom AS patient_prenom,
-               ts.id AS type_soin_id, ts.nom AS type_soin_nom, ts.prix_defaut
+               ts.id AS type_soin_id, ts.nom AS type_soin_nom, ts.prix_defaut,
+               s.medecin_id, m.nom AS medecin_nom
         FROM soins s
         LEFT JOIN patients p ON s.patient_id = p.id
         LEFT JOIN type_soin ts ON s.type_soin_id = ts.id
+        LEFT JOIN medecin m ON s.medecin_id = m.id
         WHERE s.id = %s
     """, (soin_id,))
     soin = cursor.fetchone()
@@ -120,7 +125,8 @@ def update_soin(soin_id: int, data: dict, request: Request, db=Depends(get_db), 
             nom_patient_externe = %(nom_patient_externe)s,
             prix_applique = %(prix_applique)s,
             date_soin = %(date_soin)s,
-            notes = %(notes)s
+            notes = %(notes)s,
+            medecin_id = %(medecin_id)s
         WHERE id = %(id)s
     """, {
         "type_soin_id": data["type_soin_id"],
@@ -129,6 +135,7 @@ def update_soin(soin_id: int, data: dict, request: Request, db=Depends(get_db), 
         "prix_applique": data["prix_applique"],
         "date_soin": data["date_soin"],
         "notes": data.get("notes"),
+        "medecin_id": data.get("medecin_id"),
         "id": soin_id,
     })
     if cursor.rowcount == 0:
@@ -153,7 +160,7 @@ def delete_soin(soin_id: int, request: Request, db=Depends(get_db), user=Depends
 def encaisser_soin(soin_id: int, request: Request, db=Depends(get_db), user=Depends(require_role("admin", "secretaire"))):
     cursor = db.cursor()
     cursor.execute("""
-        SELECT s.id, s.prix_applique, s.paye, s.nom_patient_externe, s.date_soin,
+        SELECT s.id, s.prix_applique, s.paye, s.nom_patient_externe, s.date_soin, s.medecin_id,
                p.nom, p.prenom, ts.nom AS type_soin_nom
         FROM soins s
         LEFT JOIN patients p ON s.patient_id = p.id
@@ -166,7 +173,10 @@ def encaisser_soin(soin_id: int, request: Request, db=Depends(get_db), user=Depe
     if soin["paye"]:
         raise HTTPException(status_code=400, detail="Soin déjà encaissé")
     cursor.execute("UPDATE soins SET paye = true WHERE id = %s", (soin_id,))
-    calculer_et_enregistrer_repartition(db, "soin", soin_id, float(soin["prix_applique"]), soin["date_soin"])
+    calculer_et_enregistrer_repartition(
+        db, "soin", soin_id, float(soin["prix_applique"]), soin["date_soin"],
+        medecin_id=soin["medecin_id"],
+    )
     db.commit()
     log_audit(db, request, user, "ENCAISSER", "soins", soin_id, None)
     patient_nom = f"{soin['nom'] or ''} {soin['prenom'] or ''}".strip() or soin["nom_patient_externe"] or "-"

@@ -28,7 +28,9 @@ def calculer_et_enregistrer_repartition(
 
     if reference_type in ("soin", "ordonnance"):
         # Décision produit : soins et ordonnances reviennent intégralement au
-        # cabinet (pas de medecin_id sur soins ; marge ordonnances suivie à part).
+        # cabinet (marge ordonnances suivie à part). Le medecin_id d'un soin est
+        # néanmoins enregistré (part à 0) pour que le bilan de garde puisse
+        # regrouper les soins par personne les ayant réalisés.
         taux_cabinet, taux_medecin, taux_laborantin = 100, 0, 0
     elif reference_type == "consultation":
         # Sans medecin_id, personne n'a droit à une part : tout revient au cabinet
