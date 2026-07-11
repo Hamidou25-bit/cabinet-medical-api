@@ -4,7 +4,12 @@ from database import get_db
 from auth import require_role, get_current_user
 from validation import require_fields, require_positive
 from audit_log import log_audit
-from stock_utils import valider_categorie_et_unites, convertir_en_unites
+from stock_utils import (
+    valider_categorie_et_unites,
+    convertir_en_unites,
+    arrondir_prix_fcfa,
+    valider_marge_pourcentage,
+)
 
 router = APIRouter(prefix="/stock", tags=["Stock"])
 
@@ -19,7 +24,8 @@ def get_stock(categorie: str = None, db=Depends(get_db), user=Depends(require_ro
     cursor.execute(f"""
         SELECT "idStock", "DateEntree", "Type", "Designation", "Fournisseur",
                "Quantite", "SeuilAlerte", "PrixVente", "PrixAchat",
-               "Dosage", "Forme", "DatePeremption", categorie, unites_par_boite
+               "Dosage", "Forme", "DatePeremption", categorie, unites_par_boite,
+               marge_personnalisee
         FROM stock
         {where_clause}
         ORDER BY "Designation"
@@ -83,6 +89,92 @@ def get_alertes_peremption(db=Depends(get_db), user=Depends(require_role("admin"
     """)
     return cursor.fetchall()
 
+def _calculer_recalcul_prix(cursor):
+    """Calcule le recalcul des prix de vente à partir des marges (catégorie ou
+    personnalisée par article). Lecture seule — utilisé par l'aperçu et
+    l'application réelle pour garantir un résultat strictement identique.
+
+    Retourne (a_modifier, ignores) :
+    - a_modifier : articles dont le nouveau prix diffère du PrixVente actuel
+    - ignores : articles à PrixAchat NULL ou <= 0, exclus du calcul (signalés
+      plutôt que recalculés en silence vers un prix aberrant à 0 FCFA)
+    """
+    cursor.execute("""
+        SELECT s."idStock", s."Designation", s.categorie,
+               s."PrixAchat", s."PrixVente",
+               s.marge_personnalisee, m.marge_pourcentage
+        FROM stock s
+        JOIN marges_categorie m ON m.categorie = s.categorie
+        WHERE s.categorie <> 'equipement'
+        ORDER BY s."Designation"
+    """)
+    a_modifier, ignores = [], []
+    for row in cursor.fetchall():
+        prix_achat = row["PrixAchat"]
+        if prix_achat is None or float(prix_achat) <= 0:
+            ignores.append({
+                "id": row["idStock"],
+                "designation": row["Designation"],
+                "categorie": row["categorie"],
+                "PrixAchat": prix_achat,
+                "raison": "PrixAchat nul ou manquant",
+            })
+            continue
+        # NUMERIC -> Decimal via psycopg2 : conversion float obligatoire avant
+        # de mélanger avec PrixAchat (REAL -> float), cf. bug Phase 15
+        marge = row["marge_personnalisee"] if row["marge_personnalisee"] is not None else row["marge_pourcentage"]
+        marge = float(marge)
+        nouveau_prix = arrondir_prix_fcfa(float(prix_achat) * (1 + marge / 100))
+        ancien_prix = row["PrixVente"]
+        if ancien_prix is None or float(ancien_prix) != float(nouveau_prix):
+            a_modifier.append({
+                "id": row["idStock"],
+                "designation": row["Designation"],
+                "categorie": row["categorie"],
+                "PrixAchat": float(prix_achat),
+                "ancien_prix_vente": float(ancien_prix) if ancien_prix is not None else None,
+                "nouveau_prix_vente": nouveau_prix,
+                "marge_appliquee": marge,
+                "marge_source": "personnalisee" if row["marge_personnalisee"] is not None else "categorie",
+            })
+    return a_modifier, ignores
+
+
+@router.get("/recalculer-prix/apercu")
+def apercu_recalcul_prix(db=Depends(get_db), user=Depends(require_role("admin"))):
+    """Aperçu du recalcul des prix de vente — ne modifie rien en base."""
+    a_modifier, ignores = _calculer_recalcul_prix(db.cursor())
+    return {
+        "nb_articles_a_modifier": len(a_modifier),
+        "articles": a_modifier,
+        "articles_ignores": ignores,
+    }
+
+
+@router.post("/recalculer-prix/appliquer")
+def appliquer_recalcul_prix(request: Request, db=Depends(get_db), user=Depends(require_role("admin"))):
+    """Applique réellement le recalcul des prix de vente (même calcul que l'aperçu)."""
+    cursor = db.cursor()
+    a_modifier, ignores = _calculer_recalcul_prix(cursor)
+    for ligne in a_modifier:
+        cursor.execute(
+            'UPDATE stock SET "PrixVente" = %s WHERE "idStock" = %s',
+            (ligne["nouveau_prix_vente"], ligne["id"]),
+        )
+    db.commit()
+    log_audit(db, request, user, "RECALCUL_PRIX", "stock", None, {
+        "nb_articles_modifies": len(a_modifier),
+        "articles": a_modifier,
+        "articles_ignores": ignores,
+    })
+    return {
+        "message": f"{len(a_modifier)} article(s) mis à jour",
+        "nb_articles_modifies": len(a_modifier),
+        "articles": a_modifier,
+        "articles_ignores": ignores,
+    }
+
+
 @router.post("/")
 def create_article(article: dict, request: Request, db=Depends(get_db), user=Depends(require_role("admin"))):
     require_fields(article, ["Designation", "Quantite", "PrixVente"])
@@ -121,8 +213,21 @@ def create_article(article: dict, request: Request, db=Depends(get_db), user=Dep
 def update_article(stock_id: int, article: dict, request: Request, db=Depends(get_db), user=Depends(require_role("admin"))):
     require_fields(article, ["Designation", "Quantite", "PrixVente"])
     unites_par_boite = valider_categorie_et_unites(article)
+
+    # marge_personnalisee : mise à jour uniquement si la clé est présente dans le
+    # payload (NULL explicite = revenir à la marge de catégorie). Un payload sans
+    # la clé ne doit pas effacer une marge existante.
+    set_marge = ""
+    params_marge = {}
+    if "marge_personnalisee" in article:
+        marge = article["marge_personnalisee"]
+        if marge is not None:
+            marge = valider_marge_pourcentage(marge, "marge_personnalisee")
+        set_marge = ", marge_personnalisee = %(marge_personnalisee)s"
+        params_marge = {"marge_personnalisee": marge}
+
     cursor = db.cursor()
-    cursor.execute("""
+    cursor.execute(f"""
         UPDATE stock
         SET "DateEntree" = %(DateEntree)s,
             "Type" = %(Type)s,
@@ -137,8 +242,10 @@ def update_article(stock_id: int, article: dict, request: Request, db=Depends(ge
             "DatePeremption" = %(DatePeremption)s,
             categorie = %(categorie)s,
             unites_par_boite = %(unites_par_boite)s
+            {set_marge}
         WHERE "idStock" = %(idStock)s
     """, {
+        **params_marge,
         "DateEntree": article.get("DateEntree"),
         "Type": article.get("Type"),
         "Designation": article.get("Designation"),

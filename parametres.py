@@ -1,8 +1,30 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from database import get_db
 from auth import get_current_user, require_role
+from stock_utils import valider_marge_pourcentage
 
 router = APIRouter(prefix="/parametres", tags=["Paramètres"])
+
+
+@router.get("/marges")
+def get_marges(db=Depends(get_db), user=Depends(get_current_user)):
+    cur = db.cursor()
+    cur.execute("SELECT categorie, marge_pourcentage FROM marges_categorie ORDER BY categorie")
+    return cur.fetchall()
+
+
+@router.put("/marges/{categorie}")
+def update_marge(categorie: str, data: dict, db=Depends(get_db), user=Depends(require_role("admin"))):
+    marge = valider_marge_pourcentage(data.get("marge_pourcentage"))
+    cur = db.cursor()
+    cur.execute(
+        "UPDATE marges_categorie SET marge_pourcentage = %s WHERE categorie = %s",
+        (marge, categorie),
+    )
+    if cur.rowcount == 0:
+        raise HTTPException(status_code=404, detail=f"Catégorie inconnue : {categorie}")
+    db.commit()
+    return {"message": "Marge mise à jour", "categorie": categorie, "marge_pourcentage": marge}
 
 
 @router.get("/")

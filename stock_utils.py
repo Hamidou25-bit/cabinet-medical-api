@@ -2,6 +2,8 @@
 
 Isolés dans ce module pour éviter qu'un module de routes en importe un autre.
 """
+import math
+
 from fastapi import HTTPException
 
 # Doit rester aligné avec la contrainte stock_categorie_check
@@ -28,6 +30,26 @@ def valider_categorie_et_unites(article):
     if unites < 1:
         raise HTTPException(status_code=400, detail="unites_par_boite doit être >= 1")
     return unites
+
+
+def arrondir_prix_fcfa(valeur):
+    """Arrondit un prix au multiple de 5 FCFA le plus proche.
+
+    Les demi-cas (x2,5 / x7,5) arrondissent vers le haut — round() natif ferait
+    un arrondi bancaire (round(2.5) == 2) imprévisible pour des prix.
+    """
+    return int(math.floor(float(valeur) / 5 + 0.5)) * 5
+
+
+def valider_marge_pourcentage(valeur, champ="marge_pourcentage"):
+    """Valide une marge en pourcentage (0 à 500 inclus). Retourne un float."""
+    try:
+        valeur = float(valeur)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail=f"{champ} doit être un nombre")
+    if not 0 <= valeur <= 500:
+        raise HTTPException(status_code=400, detail=f"{champ} doit être compris entre 0 et 500")
+    return valeur
 
 
 def convertir_en_unites(cursor, stock_id, quantite_unites, nombre_boites, unites_par_boite=None):
