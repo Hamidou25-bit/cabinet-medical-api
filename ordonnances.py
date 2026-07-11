@@ -11,11 +11,13 @@ router = APIRouter(prefix="/ordonnances", tags=["Ordonnances"])
 
 def _resoudre_ligne_ordonnance(cursor, ligne, type_beneficiaire="patient"):
     """Résout designation, montant et prix_achat d'une ligne d'ordonnance.
-    Si stock_id est renseigné, le montant et le prix d'achat sont calculés
-    à partir des prix du stock. Pour l'usage interne, le montant (utilisé pour
-    le total) est basé sur le prix d'achat plutôt que le prix de vente.
-    Sinon (médicament externe), les valeurs envoyées par le frontend sont
-    conservées telles quelles."""
+    Si stock_id est renseigné, le prix d'achat (coût) est toujours calculé
+    depuis le stock. Le montant dépend du type de bénéficiaire : usage interne,
+    toujours recalculé depuis le prix d'achat ; patient/tiers, le montant
+    envoyé par le frontend est accepté s'il est valide (> 0) — prix ajustable
+    par le prescripteur —, sinon calculé depuis le prix de vente par défaut.
+    Sans stock_id (médicament externe), les valeurs envoyées par le frontend
+    sont conservées telles quelles."""
     stock_id = ligne.get("stock_id")
     designation = ligne.get("designation")
     quantite = ligne.get("quantite", 1)
@@ -30,7 +32,14 @@ def _resoudre_ligne_ordonnance(cursor, ligne, type_beneficiaire="patient"):
         if not designation:
             designation = article["Designation"]
         prix_achat = quantite * (article["PrixAchat"] or 0)
-        montant = prix_achat if type_beneficiaire == "interne" else quantite * (article["PrixVente"] or 0)
+        if type_beneficiaire == "interne":
+            montant = prix_achat
+        else:
+            try:
+                montant_saisi = float(montant) if montant is not None else 0
+            except (TypeError, ValueError):
+                montant_saisi = 0
+            montant = montant_saisi if montant_saisi > 0 else quantite * (article["PrixVente"] or 0)
 
     if not designation:
         raise HTTPException(status_code=400, detail="Champ(s) obligatoire(s) manquant(s) : designation")
