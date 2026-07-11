@@ -9,20 +9,37 @@ from repartition import calculer_et_enregistrer_repartition
 router = APIRouter(prefix="/ordonnances", tags=["Ordonnances"])
 
 
+def _nombre_positif_ou_zero(valeur):
+    """Convertit une valeur envoyée par le frontend en float, 0 si invalide."""
+    try:
+        return float(valeur) if valeur is not None else 0
+    except (TypeError, ValueError):
+        return 0
+
+
 def _resoudre_ligne_ordonnance(cursor, ligne, type_beneficiaire="patient"):
-    """Résout designation, montant et prix_achat d'une ligne d'ordonnance.
-    Si stock_id est renseigné, le prix d'achat (coût) est toujours calculé
-    depuis le stock. Le montant dépend du type de bénéficiaire : usage interne,
-    toujours recalculé depuis le prix d'achat ; patient/tiers, le montant
-    envoyé par le frontend est accepté s'il est valide (> 0) — prix ajustable
-    par le prescripteur —, sinon calculé depuis le prix de vente par défaut.
-    Sans stock_id (médicament externe), les valeurs envoyées par le frontend
-    sont conservées telles quelles."""
+    """Résout designation, prix_unitaire, montant et prix_achat d'une ligne d'ordonnance.
+    Le montant est toujours recalculé côté serveur (prix_unitaire × quantite) — un
+    montant envoyé par le frontend n'est jamais repris tel quel (seulement utilisé,
+    en rétrocompatibilité, pour dériver le prix unitaire si celui-ci est absent).
+    Si stock_id est renseigné, le prix d'achat (coût) est toujours calculé depuis le
+    stock ; le prix unitaire est verrouillé sur PrixAchat en usage interne, et pour
+    patient/tiers le prix unitaire envoyé par le frontend est accepté s'il est valide
+    (> 0) — snapshot propre à la ligne, sans jamais réécrire stock.PrixVente —, sinon
+    PrixVente par défaut. Sans stock_id (médicament externe), le prix unitaire saisi
+    est conservé tel quel."""
     stock_id = ligne.get("stock_id")
     designation = ligne.get("designation")
     quantite = ligne.get("quantite", 1)
-    montant = ligne.get("montant", 0)
     prix_achat = ligne.get("prix_achat", 0)
+
+    prix_unitaire = _nombre_positif_ou_zero(ligne.get("prix_unitaire"))
+    if prix_unitaire <= 0:
+        # Rétrocompatibilité : ancien frontend (ou onglet encore en cache) qui
+        # n'envoie que le montant total de la ligne.
+        montant_envoye = _nombre_positif_ou_zero(ligne.get("montant"))
+        if montant_envoye > 0 and quantite > 0:
+            prix_unitaire = montant_envoye / quantite
 
     if stock_id:
         cursor.execute('SELECT "Designation", "PrixVente", "PrixAchat" FROM stock WHERE "idStock" = %s', (stock_id,))
@@ -33,20 +50,17 @@ def _resoudre_ligne_ordonnance(cursor, ligne, type_beneficiaire="patient"):
             designation = article["Designation"]
         prix_achat = quantite * (article["PrixAchat"] or 0)
         if type_beneficiaire == "interne":
-            montant = prix_achat
-        else:
-            try:
-                montant_saisi = float(montant) if montant is not None else 0
-            except (TypeError, ValueError):
-                montant_saisi = 0
-            montant = montant_saisi if montant_saisi > 0 else quantite * (article["PrixVente"] or 0)
+            prix_unitaire = article["PrixAchat"] or 0
+        elif prix_unitaire <= 0:
+            prix_unitaire = article["PrixVente"] or 0
 
     if not designation:
         raise HTTPException(status_code=400, detail="Champ(s) obligatoire(s) manquant(s) : designation")
 
     return {
         "designation": designation,
-        "montant": montant,
+        "prix_unitaire": prix_unitaire,
+        "montant": round(quantite * prix_unitaire, 2),
         "prix_achat": prix_achat,
         "stock_id": stock_id,
         "quantite": quantite,
@@ -313,9 +327,9 @@ def create_ordonnance(data: dict, request: Request, db=Depends(get_db), user=Dep
     for ligne, resolue in zip(lignes, lignes_resolues):
         cursor.execute("""
             INSERT INTO ligne_ordonnance (ordonnance_id, patient_id, date_ordonnance, designation,
-                                          dosage, forme, quantite, posologie, duree_jours, montant, prix_achat, stock_id)
+                                          dosage, forme, quantite, posologie, duree_jours, prix_unitaire, montant, prix_achat, stock_id)
             VALUES (%(ordonnance_id)s, %(patient_id)s, %(date_ordonnance)s, %(designation)s,
-                    %(dosage)s, %(forme)s, %(quantite)s, %(posologie)s, %(duree_jours)s, %(montant)s, %(prix_achat)s, %(stock_id)s)
+                    %(dosage)s, %(forme)s, %(quantite)s, %(posologie)s, %(duree_jours)s, %(prix_unitaire)s, %(montant)s, %(prix_achat)s, %(stock_id)s)
         """, {
             "ordonnance_id": ordonnance_id,
             "patient_id": data.get("patient_id"),
@@ -326,6 +340,7 @@ def create_ordonnance(data: dict, request: Request, db=Depends(get_db), user=Dep
             "quantite": ligne.get("quantite", 1),
             "posologie": ligne.get("posologie"),
             "duree_jours": ligne.get("duree_jours"),
+            "prix_unitaire": resolue["prix_unitaire"],
             "montant": resolue["montant"],
             "prix_achat": resolue["prix_achat"],
             "stock_id": resolue["stock_id"],
@@ -399,9 +414,9 @@ def update_ordonnance(ordonnance_id: int, data: dict, request: Request, db=Depen
     for ligne, resolue in zip(lignes, lignes_resolues):
         cursor.execute("""
             INSERT INTO ligne_ordonnance (ordonnance_id, patient_id, date_ordonnance, designation,
-                                          dosage, forme, quantite, posologie, duree_jours, montant, prix_achat, stock_id)
+                                          dosage, forme, quantite, posologie, duree_jours, prix_unitaire, montant, prix_achat, stock_id)
             VALUES (%(ordonnance_id)s, %(patient_id)s, %(date_ordonnance)s, %(designation)s,
-                    %(dosage)s, %(forme)s, %(quantite)s, %(posologie)s, %(duree_jours)s, %(montant)s, %(prix_achat)s, %(stock_id)s)
+                    %(dosage)s, %(forme)s, %(quantite)s, %(posologie)s, %(duree_jours)s, %(prix_unitaire)s, %(montant)s, %(prix_achat)s, %(stock_id)s)
         """, {
             "ordonnance_id": ordonnance_id,
             "patient_id": data.get("patient_id"),
@@ -412,6 +427,7 @@ def update_ordonnance(ordonnance_id: int, data: dict, request: Request, db=Depen
             "quantite": ligne.get("quantite", 1),
             "posologie": ligne.get("posologie"),
             "duree_jours": ligne.get("duree_jours"),
+            "prix_unitaire": resolue["prix_unitaire"],
             "montant": resolue["montant"],
             "prix_achat": resolue["prix_achat"],
             "stock_id": resolue["stock_id"],
