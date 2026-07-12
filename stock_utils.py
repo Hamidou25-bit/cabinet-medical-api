@@ -7,8 +7,11 @@ import math
 from fastapi import HTTPException
 
 # Doit rester aligné avec la contrainte stock_categorie_check
-# (migration 2026_07_10_stock_categorie_3_valeurs_unites_par_boite.sql)
-CATEGORIES_VALIDES = ("medicament", "consommable", "equipement")
+# (migration 2026_07_12_consommables_scindes_mouvements.sql — 'consommable' scindé
+# en 'consommable_laboratoire'/'consommable_medical' ; l'ancienne valeur reste
+# acceptée par la contrainte en base à titre transitoire mais n'est plus valide ici)
+CATEGORIES_CONSOMMABLES = ("consommable_laboratoire", "consommable_medical")
+CATEGORIES_VALIDES = ("medicament",) + CATEGORIES_CONSOMMABLES + ("equipement",)
 
 
 def valider_categorie_et_unites(article):

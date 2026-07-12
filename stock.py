@@ -9,6 +9,7 @@ from stock_utils import (
     convertir_en_unites,
     arrondir_prix_fcfa,
     valider_marge_pourcentage,
+    CATEGORIES_CONSOMMABLES,
 )
 
 router = APIRouter(prefix="/stock", tags=["Stock"])
@@ -44,6 +45,28 @@ def get_designations(db=Depends(get_db), user=Depends(require_role("admin", "med
         WHERE categorie = 'medicament'
         ORDER BY "Designation"
     """)
+    return cursor.fetchall()
+
+@router.get("/consommables")
+def get_consommables(categorie: str = None, db=Depends(get_db), user=Depends(get_current_user)):
+    """Liste allégée des consommables, accessible à tous les rôles connectés (GET /stock/
+    est admin-only) — utilisée par la page Utilisation Médicale (consommable_medical)
+    et la sélection de consommables labo sur la page Examens (consommable_laboratoire).
+    Ne renvoie JAMAIS de médicaments ni d'équipement."""
+    if categorie is not None and categorie not in CATEGORIES_CONSOMMABLES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"categorie invalide : {categorie} (valeurs possibles : {', '.join(CATEGORIES_CONSOMMABLES)})",
+        )
+    categories = [categorie] if categorie else list(CATEGORIES_CONSOMMABLES)
+    cursor = db.cursor()
+    cursor.execute("""
+        SELECT "idStock", "Designation", "Quantite", "SeuilAlerte",
+               "Dosage", "Forme", categorie
+        FROM stock
+        WHERE categorie = ANY(%s)
+        ORDER BY "Designation"
+    """, (categories,))
     return cursor.fetchall()
 
 @router.get("/disponibilite")
@@ -298,6 +321,138 @@ def reapprovisionner_article(stock_id: int, data: dict, request: Request, db=Dep
         "message": "Stock réapprovisionné",
         "unites_ajoutees": unites_ajoutees,
         "nouvelle_quantite": nouvelle_quantite,
+    }
+
+
+@router.post("/{stock_id}/consommer")
+def consommer_article(stock_id: int, data: dict, request: Request, db=Depends(get_db), user=Depends(get_current_user)):
+    """Sortie interne d'un consommable (usage non facturé au patient), tracée dans
+    mouvements_consommable. Réservée aux catégories consommable_laboratoire et
+    consommable_medical — refuse explicitement les médicaments (qui sortent
+    exclusivement via les ordonnances) et l'équipement. Tous rôles connectés."""
+    require_fields(data, ["quantite", "type_sortie"])
+
+    type_sortie = data["type_sortie"]
+    if type_sortie not in ("examen_patient", "usage_interne"):
+        raise HTTPException(
+            status_code=400,
+            detail=f"type_sortie invalide : {type_sortie} (valeurs possibles : examen_patient, usage_interne)",
+        )
+
+    try:
+        quantite = int(data["quantite"])
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="quantite doit être un entier")
+    if quantite < 1:
+        raise HTTPException(status_code=400, detail="quantite doit être >= 1")
+
+    cursor = db.cursor()
+    # FOR UPDATE : verrouille la ligne pour éviter deux prélèvements simultanés
+    # passant tous les deux le contrôle de stock suffisant
+    cursor.execute(
+        'SELECT "Designation", "Quantite", categorie FROM stock WHERE "idStock" = %s FOR UPDATE',
+        (stock_id,),
+    )
+    article = cursor.fetchone()
+    if not article:
+        raise HTTPException(status_code=404, detail="Article non trouvé")
+    if article["categorie"] not in CATEGORIES_CONSOMMABLES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cette opération est réservée aux consommables (laboratoire/médical) — "
+                   f"'{article['Designation']}' est en catégorie '{article['categorie']}'",
+        )
+    if article["Quantite"] < quantite:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Stock insuffisant pour '{article['Designation']}' : "
+                   f"{article['Quantite']} unité(s) disponible(s), {quantite} demandée(s)",
+        )
+
+    # patient_id/examen_id n'ont de sens que pour une sortie liée à un examen
+    patient_id = data.get("patient_id") if type_sortie == "examen_patient" else None
+    examen_id = data.get("examen_id") if type_sortie == "examen_patient" else None
+    # Pré-vérification des références pour renvoyer un 404 clair plutôt qu'une
+    # erreur FK illisible (500)
+    if patient_id is not None:
+        cursor.execute("SELECT id FROM patients WHERE id = %s", (patient_id,))
+        if not cursor.fetchone():
+            raise HTTPException(status_code=404, detail=f"Patient {patient_id} non trouvé")
+    if examen_id is not None:
+        cursor.execute("SELECT id FROM examens_complementaires WHERE id = %s", (examen_id,))
+        if not cursor.fetchone():
+            raise HTTPException(status_code=404, detail=f"Examen {examen_id} non trouvé")
+
+    cursor.execute(
+        'UPDATE stock SET "Quantite" = "Quantite" - %s WHERE "idStock" = %s RETURNING "Quantite"',
+        (quantite, stock_id),
+    )
+    nouvelle_quantite = cursor.fetchone()["Quantite"]
+
+    cursor.execute("""
+        INSERT INTO mouvements_consommable (stock_id, designation, quantite, type_sortie,
+                                            utilisateur_id, patient_id, examen_id, motif)
+        VALUES (%(stock_id)s, %(designation)s, %(quantite)s, %(type_sortie)s,
+                %(utilisateur_id)s, %(patient_id)s, %(examen_id)s, %(motif)s)
+        RETURNING id, stock_id, designation, quantite, type_sortie,
+                  utilisateur_id, patient_id, examen_id, motif, date_mouvement
+    """, {
+        "stock_id": stock_id,
+        "designation": article["Designation"],
+        "quantite": quantite,
+        "type_sortie": type_sortie,
+        "utilisateur_id": user["id"],
+        "patient_id": patient_id,
+        "examen_id": examen_id,
+        "motif": data.get("motif"),
+    })
+    mouvement = cursor.fetchone()
+    db.commit()
+    log_audit(db, request, user, "CONSOMMER", "stock", stock_id, {
+        "mouvement_id": mouvement["id"],
+        "designation": article["Designation"],
+        "quantite": quantite,
+        "type_sortie": type_sortie,
+        "patient_id": patient_id,
+        "examen_id": examen_id,
+        "motif": data.get("motif"),
+        "nouvelle_quantite": nouvelle_quantite,
+    })
+    return {
+        "message": "Prélèvement enregistré",
+        "mouvement": mouvement,
+        "nouvelle_quantite": nouvelle_quantite,
+    }
+
+
+@router.get("/{stock_id}/mouvements")
+def get_mouvements_article(stock_id: int, limit: int = 20, offset: int = 0, db=Depends(get_db), user=Depends(get_current_user)):
+    """Historique paginé des mouvements de consommable d'un article."""
+    limit = max(1, min(int(limit), 100))
+    offset = max(0, int(offset))
+    cursor = db.cursor()
+    cursor.execute('SELECT "idStock", "Designation" FROM stock WHERE "idStock" = %s', (stock_id,))
+    article = cursor.fetchone()
+    if not article:
+        raise HTTPException(status_code=404, detail="Article non trouvé")
+    cursor.execute("SELECT COUNT(*) AS total FROM mouvements_consommable WHERE stock_id = %s", (stock_id,))
+    total = cursor.fetchone()["total"]
+    cursor.execute("""
+        SELECT m.id, m.quantite, m.type_sortie, m.motif, m.date_mouvement,
+               m.patient_id, m.examen_id,
+               u.nom_complet AS utilisateur_nom, u.nom_utilisateur AS utilisateur_login,
+               p.nom AS patient_nom, p.prenom AS patient_prenom
+        FROM mouvements_consommable m
+        LEFT JOIN utilisateurs u ON m.utilisateur_id = u.id
+        LEFT JOIN patients p ON m.patient_id = p.id
+        WHERE m.stock_id = %s
+        ORDER BY m.date_mouvement DESC, m.id DESC
+        LIMIT %s OFFSET %s
+    """, (stock_id, limit, offset))
+    return {
+        "article": article,
+        "total": total,
+        "mouvements": cursor.fetchall(),
     }
 
 
