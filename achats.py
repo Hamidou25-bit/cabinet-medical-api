@@ -72,9 +72,14 @@ def _get_fournisseur_nom(cursor, fournisseur_id):
 
 def _creer_article_stock_pour_ligne(cursor, ligne, date_achat, fournisseur_nom):
     """Crée un nouvel article de stock pour une ligne d'achat sans correspondance, et retourne son idStock.
-    La ligne peut fournir categorie et unites_par_boite pour configurer le nouvel article
-    (sinon défauts : medicament / 1). Ces champs sont ignorés quand la ligne référence
+    La ligne doit fournir categorie (obligatoire, choix manuel — pas de défaut) et peut
+    fournir unites_par_boite (défaut 1). Ces champs sont ignorés quand la ligne référence
     un article existant (stock_id) — l'article garde alors sa configuration."""
+    if not ligne.get("categorie"):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Catégorie obligatoire pour le nouvel article « {ligne.get('designation', '')} »",
+        )
     quantite = ligne.get("quantite", 1)
     prix_unitaire = ligne.get("prix_unitaire", 0)
     unites_par_boite = valider_categorie_et_unites(ligne)

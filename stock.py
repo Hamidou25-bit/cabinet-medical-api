@@ -63,7 +63,7 @@ def get_consommables(categorie: str = None, db=Depends(get_db), user=Depends(get
     categories = [categorie] if categorie else list(CATEGORIES_CONSOMMABLES)
     cursor = db.cursor()
     cursor.execute("""
-        SELECT "idStock", "Designation", "Quantite", "SeuilAlerte",
+        SELECT "idStock", "Designation", "Quantite", "SeuilAlerte", "PrixVente",
                "Dosage", "Forme", categorie, sous_type_examen_id, quantite_examen
         FROM stock
         WHERE categorie = ANY(%s)
@@ -214,7 +214,7 @@ def appliquer_recalcul_prix(request: Request, db=Depends(get_db), user=Depends(r
     }
 
 
-def _resoudre_statut_et_prix_vente(article, statut_defaut="bon_etat"):
+def _resoudre_statut_et_prix_vente(article, cursor, statut_defaut="bon_etat"):
     """Règles spécifiques à l'équipement (jamais vendu) : PrixVente non exigé et
     forcé à 0, statut_equipement accepté. Pour toute autre catégorie : PrixVente
     obligatoire, statut_equipement refusé s'il est fourni non nul, et forcé à
@@ -225,7 +225,7 @@ def _resoudre_statut_et_prix_vente(article, statut_defaut="bon_etat"):
     est_equipement = article.get("categorie", "medicament") == "equipement"
     statut = article.get("statut_equipement")
     if est_equipement:
-        statut = valider_statut_equipement(statut) if statut is not None else statut_defaut
+        statut = valider_statut_equipement(statut, cursor) if statut is not None else statut_defaut
         return True, statut, 0
     if statut is not None:
         raise HTTPException(
@@ -275,8 +275,8 @@ def _resoudre_lien_examen(article, cursor):
 def create_article(article: dict, request: Request, db=Depends(get_db), user=Depends(require_role("admin"))):
     require_fields(article, ["Designation", "Quantite"])
     unites_par_boite = valider_categorie_et_unites(article)
-    est_equipement, statut_equipement, prix_vente = _resoudre_statut_et_prix_vente(article)
     cursor = db.cursor()
+    est_equipement, statut_equipement, prix_vente = _resoudre_statut_et_prix_vente(article, cursor)
     sous_type_examen_id, quantite_examen = _resoudre_lien_examen(article, cursor)
     cursor.execute("""
         INSERT INTO stock ("DateEntree", "Type", "Designation", "Fournisseur",
@@ -316,7 +316,8 @@ def create_article(article: dict, request: Request, db=Depends(get_db), user=Dep
 def update_article(stock_id: int, article: dict, request: Request, db=Depends(get_db), user=Depends(require_role("admin"))):
     require_fields(article, ["Designation", "Quantite"])
     unites_par_boite = valider_categorie_et_unites(article)
-    est_equipement, statut_equipement, prix_vente = _resoudre_statut_et_prix_vente(article, statut_defaut=None)
+    cursor = db.cursor()
+    est_equipement, statut_equipement, prix_vente = _resoudre_statut_et_prix_vente(article, cursor, statut_defaut=None)
 
     # marge_personnalisee : mise à jour uniquement si la clé est présente dans le
     # payload (NULL explicite = revenir à la marge de catégorie). Un payload sans
@@ -337,7 +338,6 @@ def update_article(stock_id: int, article: dict, request: Request, db=Depends(ge
     set_statut = ("statut_equipement = COALESCE(%(statut_equipement)s, statut_equipement, 'bon_etat')"
                   if est_equipement else "statut_equipement = NULL")
 
-    cursor = db.cursor()
     sous_type_examen_id, quantite_examen = _resoudre_lien_examen(article, cursor)
     cursor.execute(f"""
         UPDATE stock
@@ -519,6 +519,98 @@ def get_mouvements(categorie: str = None, limit: int = 50, offset: int = 0, db=D
         LIMIT %(limit)s OFFSET %(offset)s
     """, params)
     return {"total": total, "mouvements": cursor.fetchall()}
+
+
+@router.put("/mouvements/{mouvement_id}")
+def update_mouvement(mouvement_id: int, data: dict, request: Request, db=Depends(get_db), user=Depends(get_current_user)):
+    """Corrige un prélèvement d'usage interne (quantité et/ou motif) en réajustant
+    stock.Quantite de la différence. Réservé aux mouvements type_sortie='usage_interne' —
+    les sorties liées à un examen sont gérées automatiquement et ne se corrigent pas ici."""
+    cursor = db.cursor()
+    cursor.execute("SELECT * FROM mouvements_consommable WHERE id = %s", (mouvement_id,))
+    mouvement = cursor.fetchone()
+    if not mouvement:
+        raise HTTPException(status_code=404, detail="Mouvement non trouvé")
+    if mouvement["type_sortie"] != "usage_interne":
+        raise HTTPException(status_code=400, detail="Seuls les prélèvements d'usage interne sont modifiables")
+    if mouvement["stock_id"] is None:
+        raise HTTPException(status_code=400, detail="L'article de stock lié à ce mouvement n'existe plus — quantité non modifiable")
+
+    ancienne_quantite = mouvement["quantite"]
+    nouvelle_quantite = ancienne_quantite
+    if "quantite" in data and data["quantite"] is not None:
+        try:
+            nouvelle_quantite = int(data["quantite"])
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail="quantite doit être un entier")
+        if nouvelle_quantite < 1:
+            raise HTTPException(status_code=400, detail="quantite doit être >= 1")
+
+    delta = nouvelle_quantite - ancienne_quantite  # >0 : prélever plus, <0 : restituer
+    if delta != 0:
+        cursor.execute(
+            'SELECT "Designation", "Quantite" FROM stock WHERE "idStock" = %s FOR UPDATE',
+            (mouvement["stock_id"],),
+        )
+        article = cursor.fetchone()
+        if not article:
+            raise HTTPException(status_code=400, detail="L'article de stock lié à ce mouvement n'existe plus — quantité non modifiable")
+        if article["Quantite"] - delta < 0:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Stock insuffisant pour '{article['Designation']}' : "
+                       f"{article['Quantite']} unité(s) disponible(s), {delta} supplémentaire(s) demandée(s)",
+            )
+        cursor.execute(
+            'UPDATE stock SET "Quantite" = "Quantite" - %s WHERE "idStock" = %s',
+            (delta, mouvement["stock_id"]),
+        )
+
+    motif = data.get("motif", mouvement["motif"])
+    cursor.execute("""
+        UPDATE mouvements_consommable SET quantite = %s, motif = %s WHERE id = %s
+        RETURNING id, stock_id, designation, quantite, type_sortie, motif, date_mouvement
+    """, (nouvelle_quantite, motif, mouvement_id))
+    updated = cursor.fetchone()
+    db.commit()
+    log_audit(db, request, user, "UPDATE", "mouvements_consommable", mouvement_id, {
+        "designation": mouvement["designation"],
+        "ancienne_quantite": ancienne_quantite,
+        "nouvelle_quantite": nouvelle_quantite,
+        "delta_stock": -delta,
+        "motif": motif,
+    })
+    return {"message": "Mouvement modifié", "mouvement": updated}
+
+
+@router.delete("/mouvements/{mouvement_id}")
+def delete_mouvement(mouvement_id: int, request: Request, db=Depends(get_db), user=Depends(get_current_user)):
+    """Supprime un prélèvement d'usage interne et restitue la quantité au stock.
+    Réservé aux mouvements type_sortie='usage_interne'. Si l'article de stock a été
+    supprimé entre-temps (stock_id NULL), le mouvement est supprimé sans restitution."""
+    cursor = db.cursor()
+    cursor.execute("SELECT * FROM mouvements_consommable WHERE id = %s", (mouvement_id,))
+    mouvement = cursor.fetchone()
+    if not mouvement:
+        raise HTTPException(status_code=404, detail="Mouvement non trouvé")
+    if mouvement["type_sortie"] != "usage_interne":
+        raise HTTPException(status_code=400, detail="Seuls les prélèvements d'usage interne sont supprimables")
+
+    stock_restaure = False
+    if mouvement["stock_id"] is not None:
+        cursor.execute(
+            'UPDATE stock SET "Quantite" = "Quantite" + %s WHERE "idStock" = %s RETURNING "Quantite"',
+            (mouvement["quantite"], mouvement["stock_id"]),
+        )
+        stock_restaure = cursor.fetchone() is not None
+    cursor.execute("DELETE FROM mouvements_consommable WHERE id = %s", (mouvement_id,))
+    db.commit()
+    log_audit(db, request, user, "DELETE", "mouvements_consommable", mouvement_id, {
+        "designation": mouvement["designation"],
+        "quantite_restituee": mouvement["quantite"] if stock_restaure else 0,
+        "stock_id": mouvement["stock_id"],
+    })
+    return {"message": "Mouvement supprimé", "stock_restaure": stock_restaure}
 
 
 @router.get("/{stock_id}/mouvements")

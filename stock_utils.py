@@ -13,21 +13,38 @@ from fastapi import HTTPException
 CATEGORIES_CONSOMMABLES = ("consommable_laboratoire", "consommable_medical")
 CATEGORIES_VALIDES = ("medicament",) + CATEGORIES_CONSOMMABLES + ("equipement",)
 
-# Doit rester aligné avec la contrainte CHECK de stock.statut_equipement
-# (migration 2026_07_12_stock_statut_equipement.sql). Pertinent uniquement
-# pour categorie='equipement' — NULL pour toutes les autres catégories.
+# Statuts de base des équipements. La contrainte CHECK en base a été retirée
+# (migration 2026_07_13_statuts_equipement_extensibles.sql) : des statuts
+# supplémentaires (libellés libres, séparés par |) peuvent être ajoutés via le
+# paramètre 'statuts_equipement_personnalises' de parametres_cabinet.
+# Pertinent uniquement pour categorie='equipement' — NULL sinon.
 STATUTS_EQUIPEMENT = ("bon_etat", "en_utilisation", "a_remplacer")
 
 
-def valider_statut_equipement(statut):
-    """Valide un statut d'équipement non nul (la contrainte CHECK renverrait un
-    500 illisible). Le contrôle categorie='equipement' est fait par l'appelant."""
-    if statut not in STATUTS_EQUIPEMENT:
-        raise HTTPException(
-            status_code=400,
-            detail=f"statut_equipement invalide : {statut} (valeurs possibles : {', '.join(STATUTS_EQUIPEMENT)})",
-        )
-    return statut
+def lire_statuts_equipement_personnalises(cursor):
+    """Statuts d'équipement supplémentaires définis par l'admin
+    (parametres_cabinet.statuts_equipement_personnalises, libellés séparés par |)."""
+    cursor.execute(
+        "SELECT valeur FROM parametres_cabinet WHERE cle = 'statuts_equipement_personnalises'"
+    )
+    row = cursor.fetchone()
+    valeur = (row["valeur"] if row else None) or ""
+    return [s.strip() for s in valeur.split("|") if s.strip()]
+
+
+def valider_statut_equipement(statut, cursor):
+    """Valide un statut d'équipement non nul : statut de base, ou statut
+    personnalisé (parametres_cabinet). Le contrôle categorie='equipement'
+    est fait par l'appelant."""
+    if statut in STATUTS_EQUIPEMENT:
+        return statut
+    personnalises = lire_statuts_equipement_personnalises(cursor)
+    if statut in personnalises:
+        return statut
+    raise HTTPException(
+        status_code=400,
+        detail=f"statut_equipement invalide : {statut} (valeurs possibles : {', '.join(STATUTS_EQUIPEMENT + tuple(personnalises))})",
+    )
 
 
 def valider_categorie_et_unites(article):

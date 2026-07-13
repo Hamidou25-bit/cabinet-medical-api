@@ -74,10 +74,12 @@ def get_dossier_patient(patient_id: int, db=Depends(get_db), user=Depends(get_cu
 
     cursor.execute("""
         SELECT e.id, e.date_examen, e.resultat, e.prix,
-               ste.nom AS type_examen_nom, te.nom AS categorie_nom
+               COALESCE(ste.nom, sa."Designation") AS type_examen_nom,
+               COALESCE(te.nom, CASE WHEN e.article_stock_id IS NOT NULL THEN 'Laboratoire' END) AS categorie_nom
         FROM examens_complementaires e
         LEFT JOIN sous_type_examen ste ON e.sous_type_examen_id = ste.id
         LEFT JOIN type_examen te ON ste.type_examen_id = te.id
+        LEFT JOIN stock sa ON e.article_stock_id = sa."idStock"
         WHERE e.patient_id = %s
         ORDER BY e.date_examen DESC, e.id DESC
     """, (patient_id,))
