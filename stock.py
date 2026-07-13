@@ -10,6 +10,7 @@ from stock_utils import (
     arrondir_prix_fcfa,
     valider_marge_pourcentage,
     valider_statut_equipement,
+    consommer_stock,
     CATEGORIES_CONSOMMABLES,
 )
 
@@ -27,7 +28,7 @@ def get_stock(categorie: str = None, db=Depends(get_db), user=Depends(require_ro
         SELECT "idStock", "DateEntree", "Type", "Designation", "Fournisseur",
                "Quantite", "SeuilAlerte", "PrixVente", "PrixAchat",
                "Dosage", "Forme", "DatePeremption", categorie, unites_par_boite,
-               marge_personnalisee, statut_equipement
+               marge_personnalisee, statut_equipement, sous_type_examen_id, quantite_examen
         FROM stock
         {where_clause}
         ORDER BY "Designation"
@@ -63,7 +64,7 @@ def get_consommables(categorie: str = None, db=Depends(get_db), user=Depends(get
     cursor = db.cursor()
     cursor.execute("""
         SELECT "idStock", "Designation", "Quantite", "SeuilAlerte",
-               "Dosage", "Forme", categorie
+               "Dosage", "Forme", categorie, sous_type_examen_id, quantite_examen
         FROM stock
         WHERE categorie = ANY(%s)
         ORDER BY "Designation"
@@ -235,23 +236,61 @@ def _resoudre_statut_et_prix_vente(article, statut_defaut="bon_etat"):
     return False, None, article.get("PrixVente")
 
 
+def _resoudre_lien_examen(article, cursor):
+    """Lien consommable labo → type d'examen (pré-remplissage des consommables du
+    modal Examen). Pertinent uniquement pour categorie='consommable_laboratoire' :
+    pour toute autre catégorie, sous_type_examen_id est refusé s'il est fourni non
+    nul et forcé à NULL en base (quantite_examen retombe au défaut 1) — même
+    pattern que statut_equipement. Retourne (sous_type_examen_id, quantite_examen)."""
+    est_labo = article.get("categorie", "medicament") == "consommable_laboratoire"
+    sous_type_id = article.get("sous_type_examen_id")
+    if not est_labo:
+        if sous_type_id is not None:
+            raise HTTPException(
+                status_code=400,
+                detail="sous_type_examen_id n'est accepté que pour la catégorie 'consommable_laboratoire'",
+            )
+        return None, 1
+    if sous_type_id is not None:
+        try:
+            sous_type_id = int(sous_type_id)
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail="sous_type_examen_id doit être un entier")
+        cursor.execute("SELECT id FROM sous_type_examen WHERE id = %s", (sous_type_id,))
+        if not cursor.fetchone():
+            raise HTTPException(status_code=404, detail=f"Type d'examen {sous_type_id} non trouvé")
+    quantite = article.get("quantite_examen")
+    if quantite is None or quantite == "":
+        quantite = 1
+    try:
+        quantite = float(quantite)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="quantite_examen doit être un nombre")
+    if quantite <= 0:
+        raise HTTPException(status_code=400, detail="quantite_examen doit être > 0")
+    return sous_type_id, quantite
+
+
 @router.post("/")
 def create_article(article: dict, request: Request, db=Depends(get_db), user=Depends(require_role("admin"))):
     require_fields(article, ["Designation", "Quantite"])
     unites_par_boite = valider_categorie_et_unites(article)
     est_equipement, statut_equipement, prix_vente = _resoudre_statut_et_prix_vente(article)
     cursor = db.cursor()
+    sous_type_examen_id, quantite_examen = _resoudre_lien_examen(article, cursor)
     cursor.execute("""
         INSERT INTO stock ("DateEntree", "Type", "Designation", "Fournisseur",
                           "Quantite", "SeuilAlerte", "PrixVente", "PrixAchat",
                           "Dosage", "Forme", "DatePeremption", categorie, unites_par_boite,
-                          statut_equipement)
+                          statut_equipement, sous_type_examen_id, quantite_examen)
         VALUES (%(DateEntree)s, %(Type)s, %(Designation)s, %(Fournisseur)s,
                 %(Quantite)s, %(SeuilAlerte)s, %(PrixVente)s, %(PrixAchat)s,
                 %(Dosage)s, %(Forme)s, %(DatePeremption)s, %(categorie)s, %(unites_par_boite)s,
-                %(statut_equipement)s)
+                %(statut_equipement)s, %(sous_type_examen_id)s, %(quantite_examen)s)
         RETURNING "idStock"
     """, {
+        "sous_type_examen_id": sous_type_examen_id,
+        "quantite_examen": quantite_examen,
         "DateEntree": article.get("DateEntree"),
         "Type": article.get("Type"),
         "Designation": article.get("Designation"),
@@ -299,6 +338,7 @@ def update_article(stock_id: int, article: dict, request: Request, db=Depends(ge
                   if est_equipement else "statut_equipement = NULL")
 
     cursor = db.cursor()
+    sous_type_examen_id, quantite_examen = _resoudre_lien_examen(article, cursor)
     cursor.execute(f"""
         UPDATE stock
         SET "DateEntree" = %(DateEntree)s,
@@ -314,12 +354,16 @@ def update_article(stock_id: int, article: dict, request: Request, db=Depends(ge
             "DatePeremption" = %(DatePeremption)s,
             categorie = %(categorie)s,
             unites_par_boite = %(unites_par_boite)s,
+            sous_type_examen_id = %(sous_type_examen_id)s,
+            quantite_examen = %(quantite_examen)s,
             {set_statut}
             {set_marge}
         WHERE "idStock" = %(idStock)s
     """, {
         **params_marge,
         "statut_equipement": statut_equipement,
+        "sous_type_examen_id": sous_type_examen_id,
+        "quantite_examen": quantite_examen,
         "DateEntree": article.get("DateEntree"),
         "Type": article.get("Type"),
         "Designation": article.get("Designation"),
@@ -398,28 +442,6 @@ def consommer_article(stock_id: int, data: dict, request: Request, db=Depends(ge
         raise HTTPException(status_code=400, detail="quantite doit être >= 1")
 
     cursor = db.cursor()
-    # FOR UPDATE : verrouille la ligne pour éviter deux prélèvements simultanés
-    # passant tous les deux le contrôle de stock suffisant
-    cursor.execute(
-        'SELECT "Designation", "Quantite", categorie FROM stock WHERE "idStock" = %s FOR UPDATE',
-        (stock_id,),
-    )
-    article = cursor.fetchone()
-    if not article:
-        raise HTTPException(status_code=404, detail="Article non trouvé")
-    if article["categorie"] not in CATEGORIES_CONSOMMABLES:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Cette opération est réservée aux consommables (laboratoire/médical) — "
-                   f"'{article['Designation']}' est en catégorie '{article['categorie']}'",
-        )
-    if article["Quantite"] < quantite:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Stock insuffisant pour '{article['Designation']}' : "
-                   f"{article['Quantite']} unité(s) disponible(s), {quantite} demandée(s)",
-        )
-
     # patient_id/examen_id n'ont de sens que pour une sortie liée à un examen
     patient_id = data.get("patient_id") if type_sortie == "examen_patient" else None
     examen_id = data.get("examen_id") if type_sortie == "examen_patient" else None
@@ -434,30 +456,12 @@ def consommer_article(stock_id: int, data: dict, request: Request, db=Depends(ge
         if not cursor.fetchone():
             raise HTTPException(status_code=404, detail=f"Examen {examen_id} non trouvé")
 
-    cursor.execute(
-        'UPDATE stock SET "Quantite" = "Quantite" - %s WHERE "idStock" = %s RETURNING "Quantite"',
-        (quantite, stock_id),
+    # consommer_stock verrouille la ligne (FOR UPDATE) : évite deux prélèvements
+    # simultanés passant tous les deux le contrôle de stock suffisant
+    article, mouvement, nouvelle_quantite = consommer_stock(
+        cursor, stock_id, quantite, type_sortie, user["id"],
+        patient_id=patient_id, examen_id=examen_id, motif=data.get("motif"),
     )
-    nouvelle_quantite = cursor.fetchone()["Quantite"]
-
-    cursor.execute("""
-        INSERT INTO mouvements_consommable (stock_id, designation, quantite, type_sortie,
-                                            utilisateur_id, patient_id, examen_id, motif)
-        VALUES (%(stock_id)s, %(designation)s, %(quantite)s, %(type_sortie)s,
-                %(utilisateur_id)s, %(patient_id)s, %(examen_id)s, %(motif)s)
-        RETURNING id, stock_id, designation, quantite, type_sortie,
-                  utilisateur_id, patient_id, examen_id, motif, date_mouvement
-    """, {
-        "stock_id": stock_id,
-        "designation": article["Designation"],
-        "quantite": quantite,
-        "type_sortie": type_sortie,
-        "utilisateur_id": user["id"],
-        "patient_id": patient_id,
-        "examen_id": examen_id,
-        "motif": data.get("motif"),
-    })
-    mouvement = cursor.fetchone()
     db.commit()
     log_audit(db, request, user, "CONSOMMER", "stock", stock_id, {
         "mouvement_id": mouvement["id"],
@@ -474,6 +478,47 @@ def consommer_article(stock_id: int, data: dict, request: Request, db=Depends(ge
         "mouvement": mouvement,
         "nouvelle_quantite": nouvelle_quantite,
     }
+
+
+@router.get("/mouvements")
+def get_mouvements(categorie: str = None, limit: int = 50, offset: int = 0, db=Depends(get_db), user=Depends(get_current_user)):
+    """Historique paginé des mouvements de consommable, tous articles confondus,
+    filtrable par catégorie (ex: consommable_laboratoire pour le modal Consommables
+    de la page Examens)."""
+    if categorie is not None and categorie not in CATEGORIES_CONSOMMABLES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"categorie invalide : {categorie} (valeurs possibles : {', '.join(CATEGORIES_CONSOMMABLES)})",
+        )
+    limit = max(1, min(int(limit), 200))
+    offset = max(0, int(offset))
+    where_clause = ""
+    params = {"limit": limit, "offset": offset}
+    if categorie:
+        where_clause = "WHERE s.categorie = %(categorie)s"
+        params["categorie"] = categorie
+    cursor = db.cursor()
+    cursor.execute(f"""
+        SELECT COUNT(*) AS total
+        FROM mouvements_consommable m
+        LEFT JOIN stock s ON m.stock_id = s."idStock"
+        {where_clause}
+    """, params)
+    total = cursor.fetchone()["total"]
+    cursor.execute(f"""
+        SELECT m.id, m.stock_id, m.designation, m.quantite, m.type_sortie, m.motif,
+               m.date_mouvement, m.patient_id, m.examen_id,
+               u.nom_complet AS utilisateur_nom, u.nom_utilisateur AS utilisateur_login,
+               p.nom AS patient_nom, p.prenom AS patient_prenom
+        FROM mouvements_consommable m
+        LEFT JOIN stock s ON m.stock_id = s."idStock"
+        LEFT JOIN utilisateurs u ON m.utilisateur_id = u.id
+        LEFT JOIN patients p ON m.patient_id = p.id
+        {where_clause}
+        ORDER BY m.date_mouvement DESC, m.id DESC
+        LIMIT %(limit)s OFFSET %(offset)s
+    """, params)
+    return {"total": total, "mouvements": cursor.fetchall()}
 
 
 @router.get("/{stock_id}/mouvements")

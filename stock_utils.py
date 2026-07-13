@@ -71,6 +71,61 @@ def valider_marge_pourcentage(valeur, champ="marge_pourcentage"):
     return valeur
 
 
+def consommer_stock(cursor, stock_id, quantite, type_sortie, utilisateur_id,
+                    patient_id=None, examen_id=None, motif=None):
+    """Sortie de consommable tracée dans mouvements_consommable (cœur partagé entre
+    POST /stock/{id}/consommer et la consommation automatique à la création d'un
+    examen). Verrouille la ligne (FOR UPDATE), contrôle catégorie et stock suffisant,
+    décrémente et insère le mouvement. Ne commit PAS — à la charge de l'appelant.
+    Retourne (article, mouvement, nouvelle_quantite). Lève HTTPException (404/400)
+    en cas d'article inconnu, catégorie non consommable ou stock insuffisant."""
+    cursor.execute(
+        'SELECT "Designation", "Quantite", categorie FROM stock WHERE "idStock" = %s FOR UPDATE',
+        (stock_id,),
+    )
+    article = cursor.fetchone()
+    if not article:
+        raise HTTPException(status_code=404, detail="Article non trouvé")
+    if article["categorie"] not in CATEGORIES_CONSOMMABLES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cette opération est réservée aux consommables (laboratoire/médical) — "
+                   f"'{article['Designation']}' est en catégorie '{article['categorie']}'",
+        )
+    if article["Quantite"] < quantite:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Stock insuffisant pour '{article['Designation']}' : "
+                   f"{article['Quantite']} unité(s) disponible(s), {quantite} demandée(s)",
+        )
+
+    cursor.execute(
+        'UPDATE stock SET "Quantite" = "Quantite" - %s WHERE "idStock" = %s RETURNING "Quantite"',
+        (quantite, stock_id),
+    )
+    nouvelle_quantite = cursor.fetchone()["Quantite"]
+
+    cursor.execute("""
+        INSERT INTO mouvements_consommable (stock_id, designation, quantite, type_sortie,
+                                            utilisateur_id, patient_id, examen_id, motif)
+        VALUES (%(stock_id)s, %(designation)s, %(quantite)s, %(type_sortie)s,
+                %(utilisateur_id)s, %(patient_id)s, %(examen_id)s, %(motif)s)
+        RETURNING id, stock_id, designation, quantite, type_sortie,
+                  utilisateur_id, patient_id, examen_id, motif, date_mouvement
+    """, {
+        "stock_id": stock_id,
+        "designation": article["Designation"],
+        "quantite": quantite,
+        "type_sortie": type_sortie,
+        "utilisateur_id": utilisateur_id,
+        "patient_id": patient_id,
+        "examen_id": examen_id,
+        "motif": motif,
+    })
+    mouvement = cursor.fetchone()
+    return article, mouvement, nouvelle_quantite
+
+
 def convertir_en_unites(cursor, stock_id, quantite_unites, nombre_boites, unites_par_boite=None):
     """Convertit une saisie en unités canoniques de stock.
 

@@ -76,6 +76,9 @@ def delete_type(type_id: int, db=Depends(get_db), user=Depends(require_role("adm
     cursor.execute("SELECT COUNT(*) AS total FROM examens_complementaires WHERE sous_type_examen_id = %s", (type_id,))
     if cursor.fetchone()["total"] > 0:
         raise HTTPException(status_code=409, detail="Ce type d'examen est utilisé par des examens existants et ne peut pas être supprimé")
+    cursor.execute("SELECT COUNT(*) AS total FROM stock WHERE sous_type_examen_id = %s", (type_id,))
+    if cursor.fetchone()["total"] > 0:
+        raise HTTPException(status_code=409, detail="Ce type d'examen est associé à des articles de stock (consommables laboratoire) — retirez d'abord le lien sur la fiche article")
     cursor.execute("DELETE FROM sous_type_examen WHERE id = %s", (type_id,))
     if cursor.rowcount == 0:
         raise HTTPException(status_code=404, detail="Type d'examen non trouvé")
