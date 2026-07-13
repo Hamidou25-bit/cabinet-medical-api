@@ -13,6 +13,22 @@ from fastapi import HTTPException
 CATEGORIES_CONSOMMABLES = ("consommable_laboratoire", "consommable_medical")
 CATEGORIES_VALIDES = ("medicament",) + CATEGORIES_CONSOMMABLES + ("equipement",)
 
+# Doit rester aligné avec la contrainte CHECK de stock.statut_equipement
+# (migration 2026_07_12_stock_statut_equipement.sql). Pertinent uniquement
+# pour categorie='equipement' — NULL pour toutes les autres catégories.
+STATUTS_EQUIPEMENT = ("bon_etat", "en_utilisation", "a_remplacer")
+
+
+def valider_statut_equipement(statut):
+    """Valide un statut d'équipement non nul (la contrainte CHECK renverrait un
+    500 illisible). Le contrôle categorie='equipement' est fait par l'appelant."""
+    if statut not in STATUTS_EQUIPEMENT:
+        raise HTTPException(
+            status_code=400,
+            detail=f"statut_equipement invalide : {statut} (valeurs possibles : {', '.join(STATUTS_EQUIPEMENT)})",
+        )
+    return statut
+
 
 def valider_categorie_et_unites(article):
     """Valide categorie et unites_par_boite avant écriture (sinon la contrainte

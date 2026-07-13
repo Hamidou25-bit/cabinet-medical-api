@@ -78,13 +78,19 @@ def _creer_article_stock_pour_ligne(cursor, ligne, date_achat, fournisseur_nom):
     quantite = ligne.get("quantite", 1)
     prix_unitaire = ligne.get("prix_unitaire", 0)
     unites_par_boite = valider_categorie_et_unites(ligne)
+    # Équipement : jamais vendu — PrixVente forcé à 0 (pas de retombée sur le prix
+    # d'achat) et statut de suivi initialisé à 'bon_etat'. La DateEntree (= date de
+    # l'achat) sert de date d'achat affichée sur l'onglet Équipement.
+    est_equipement = ligne.get("categorie", "medicament") == "equipement"
     cursor.execute("""
         INSERT INTO stock ("DateEntree", "Type", "Designation", "Fournisseur",
                           "Quantite", "SeuilAlerte", "PrixVente", "PrixAchat",
-                          "Dosage", "Forme", "DatePeremption", categorie, unites_par_boite)
+                          "Dosage", "Forme", "DatePeremption", categorie, unites_par_boite,
+                          statut_equipement)
         VALUES (%(DateEntree)s, %(Type)s, %(Designation)s, %(Fournisseur)s,
                 %(Quantite)s, %(SeuilAlerte)s, %(PrixVente)s, %(PrixAchat)s,
-                %(Dosage)s, %(Forme)s, %(DatePeremption)s, %(categorie)s, %(unites_par_boite)s)
+                %(Dosage)s, %(Forme)s, %(DatePeremption)s, %(categorie)s, %(unites_par_boite)s,
+                %(statut_equipement)s)
         RETURNING "idStock"
     """, {
         "DateEntree": date_achat,
@@ -93,13 +99,14 @@ def _creer_article_stock_pour_ligne(cursor, ligne, date_achat, fournisseur_nom):
         "Fournisseur": fournisseur_nom,
         "Quantite": quantite,
         "SeuilAlerte": ligne.get("seuil_alerte") or 5,
-        "PrixVente": ligne.get("prix_vente") or prix_unitaire,
+        "PrixVente": 0 if est_equipement else (ligne.get("prix_vente") or prix_unitaire),
         "PrixAchat": prix_unitaire,
         "Dosage": ligne.get("dosage"),
         "Forme": ligne.get("forme"),
         "DatePeremption": ligne.get("date_peremption"),
         "categorie": ligne.get("categorie", "medicament"),
         "unites_par_boite": unites_par_boite,
+        "statut_equipement": "bon_etat" if est_equipement else None,
     })
     return cursor.fetchone()["idStock"]
 

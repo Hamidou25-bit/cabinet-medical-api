@@ -9,6 +9,7 @@ from stock_utils import (
     convertir_en_unites,
     arrondir_prix_fcfa,
     valider_marge_pourcentage,
+    valider_statut_equipement,
     CATEGORIES_CONSOMMABLES,
 )
 
@@ -26,7 +27,7 @@ def get_stock(categorie: str = None, db=Depends(get_db), user=Depends(require_ro
         SELECT "idStock", "DateEntree", "Type", "Designation", "Fournisseur",
                "Quantite", "SeuilAlerte", "PrixVente", "PrixAchat",
                "Dosage", "Forme", "DatePeremption", categorie, unites_par_boite,
-               marge_personnalisee
+               marge_personnalisee, statut_equipement
         FROM stock
         {where_clause}
         ORDER BY "Designation"
@@ -96,6 +97,20 @@ def get_alertes(db=Depends(get_db), user=Depends(require_role("admin"))):
         WHERE "Quantite" <= "SeuilAlerte"
           AND categorie <> 'equipement'
         ORDER BY "Quantite"
+    """)
+    return cursor.fetchall()
+
+@router.get("/equipements-a-remplacer")
+def get_equipements_a_remplacer(db=Depends(get_db), user=Depends(require_role("admin"))):
+    """Équipements passés manuellement en statut 'a_remplacer' — pendant de
+    GET /alertes (qui, lui, exclut l'équipement : pas de logique de seuil)."""
+    cursor = db.cursor()
+    cursor.execute("""
+        SELECT "idStock", "Designation", "Type", "DateEntree", "Fournisseur"
+        FROM stock
+        WHERE categorie = 'equipement'
+          AND statut_equipement = 'a_remplacer'
+        ORDER BY "Designation"
     """)
     return cursor.fetchall()
 
@@ -198,18 +213,43 @@ def appliquer_recalcul_prix(request: Request, db=Depends(get_db), user=Depends(r
     }
 
 
+def _resoudre_statut_et_prix_vente(article, statut_defaut="bon_etat"):
+    """Règles spécifiques à l'équipement (jamais vendu) : PrixVente non exigé et
+    forcé à 0, statut_equipement accepté. Pour toute autre catégorie : PrixVente
+    obligatoire, statut_equipement refusé s'il est fourni non nul, et forcé à
+    NULL en base. statut_defaut s'applique quand le payload ne fournit pas de
+    statut : 'bon_etat' à la création, None à la mise à jour (le PUT conserve
+    alors le statut existant via COALESCE plutôt que de l'écraser).
+    Retourne (est_equipement, statut_equipement, prix_vente)."""
+    est_equipement = article.get("categorie", "medicament") == "equipement"
+    statut = article.get("statut_equipement")
+    if est_equipement:
+        statut = valider_statut_equipement(statut) if statut is not None else statut_defaut
+        return True, statut, 0
+    if statut is not None:
+        raise HTTPException(
+            status_code=400,
+            detail="statut_equipement n'est accepté que pour la catégorie 'equipement'",
+        )
+    require_fields(article, ["PrixVente"])
+    return False, None, article.get("PrixVente")
+
+
 @router.post("/")
 def create_article(article: dict, request: Request, db=Depends(get_db), user=Depends(require_role("admin"))):
-    require_fields(article, ["Designation", "Quantite", "PrixVente"])
+    require_fields(article, ["Designation", "Quantite"])
     unites_par_boite = valider_categorie_et_unites(article)
+    est_equipement, statut_equipement, prix_vente = _resoudre_statut_et_prix_vente(article)
     cursor = db.cursor()
     cursor.execute("""
         INSERT INTO stock ("DateEntree", "Type", "Designation", "Fournisseur",
                           "Quantite", "SeuilAlerte", "PrixVente", "PrixAchat",
-                          "Dosage", "Forme", "DatePeremption", categorie, unites_par_boite)
+                          "Dosage", "Forme", "DatePeremption", categorie, unites_par_boite,
+                          statut_equipement)
         VALUES (%(DateEntree)s, %(Type)s, %(Designation)s, %(Fournisseur)s,
                 %(Quantite)s, %(SeuilAlerte)s, %(PrixVente)s, %(PrixAchat)s,
-                %(Dosage)s, %(Forme)s, %(DatePeremption)s, %(categorie)s, %(unites_par_boite)s)
+                %(Dosage)s, %(Forme)s, %(DatePeremption)s, %(categorie)s, %(unites_par_boite)s,
+                %(statut_equipement)s)
         RETURNING "idStock"
     """, {
         "DateEntree": article.get("DateEntree"),
@@ -218,13 +258,14 @@ def create_article(article: dict, request: Request, db=Depends(get_db), user=Dep
         "Fournisseur": article.get("Fournisseur"),
         "Quantite": article.get("Quantite"),
         "SeuilAlerte": article.get("SeuilAlerte"),
-        "PrixVente": article.get("PrixVente"),
+        "PrixVente": prix_vente,
         "PrixAchat": article.get("PrixAchat"),
         "Dosage": article.get("Dosage"),
         "Forme": article.get("Forme"),
         "DatePeremption": article.get("DatePeremption"),
         "categorie": article.get("categorie", "medicament"),
         "unites_par_boite": unites_par_boite,
+        "statut_equipement": statut_equipement,
     })
     db.commit()
     new_id = cursor.fetchone()["idStock"]
@@ -234,8 +275,9 @@ def create_article(article: dict, request: Request, db=Depends(get_db), user=Dep
 
 @router.put("/{stock_id}")
 def update_article(stock_id: int, article: dict, request: Request, db=Depends(get_db), user=Depends(require_role("admin"))):
-    require_fields(article, ["Designation", "Quantite", "PrixVente"])
+    require_fields(article, ["Designation", "Quantite"])
     unites_par_boite = valider_categorie_et_unites(article)
+    est_equipement, statut_equipement, prix_vente = _resoudre_statut_et_prix_vente(article, statut_defaut=None)
 
     # marge_personnalisee : mise à jour uniquement si la clé est présente dans le
     # payload (NULL explicite = revenir à la marge de catégorie). Un payload sans
@@ -248,6 +290,13 @@ def update_article(stock_id: int, article: dict, request: Request, db=Depends(ge
             marge = valider_marge_pourcentage(marge, "marge_personnalisee")
         set_marge = ", marge_personnalisee = %(marge_personnalisee)s"
         params_marge = {"marge_personnalisee": marge}
+
+    # Équipement : COALESCE conserve le statut existant si le payload n'en fournit
+    # pas (et 'bon_etat' couvre le reclassement d'un article vers équipement).
+    # Autres catégories : statut remis à NULL (efface un statut devenu obsolète
+    # après reclassement hors équipement).
+    set_statut = ("statut_equipement = COALESCE(%(statut_equipement)s, statut_equipement, 'bon_etat')"
+                  if est_equipement else "statut_equipement = NULL")
 
     cursor = db.cursor()
     cursor.execute(f"""
@@ -264,18 +313,20 @@ def update_article(stock_id: int, article: dict, request: Request, db=Depends(ge
             "Forme" = %(Forme)s,
             "DatePeremption" = %(DatePeremption)s,
             categorie = %(categorie)s,
-            unites_par_boite = %(unites_par_boite)s
+            unites_par_boite = %(unites_par_boite)s,
+            {set_statut}
             {set_marge}
         WHERE "idStock" = %(idStock)s
     """, {
         **params_marge,
+        "statut_equipement": statut_equipement,
         "DateEntree": article.get("DateEntree"),
         "Type": article.get("Type"),
         "Designation": article.get("Designation"),
         "Fournisseur": article.get("Fournisseur"),
         "Quantite": article.get("Quantite"),
         "SeuilAlerte": article.get("SeuilAlerte"),
-        "PrixVente": article.get("PrixVente"),
+        "PrixVente": prix_vente,
         "PrixAchat": article.get("PrixAchat"),
         "Dosage": article.get("Dosage"),
         "Forme": article.get("Forme"),
